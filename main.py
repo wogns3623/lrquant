@@ -128,12 +128,13 @@ def evaluate(lm, args, logger, fp_lm):
             fp_lm.model.config.use_cache = False
             fp_lm.model.eval()
 
-            lm2 = copy.deepcopy(lm)
-            lm2.model = lm2.model.cpu()
-            lm2.model.config.use_cache = False
-            lm2.model.eval()
+            if dataset != args.calib_dataset and args.tta:
+                # for tta
+                lm2 = copy.deepcopy(lm)
+                lm2.model = lm2.model.cpu()
+                lm2.model.config.use_cache = False
+                lm2.model.eval()
 
-            if dataset != args.calib_dataset and args.tta:   
                 lm.model = lm.model.cpu()     
                 lm2.model = lm2.model.to(lm2.device)
                 lm2.model.eval()
@@ -164,8 +165,8 @@ def evaluate(lm, args, logger, fp_lm):
                     outputs = tmp_lm.model.model.decoder(batch)
                 elif "llama" in args.net.lower():
                     outputs = tmp_lm.model.model(batch) # 1*2048*4096
-                    hidden_states = outputs[0] #1*2048*4096
-                    logits = tmp_lm.model.lm_head(hidden_states) #1*2048*32000
+                hidden_states = outputs[0] #1*2048*4096
+                logits = tmp_lm.model.lm_head(hidden_states) #1*2048*32000
                 shift_logits = logits[:, :-1, :] #1*2047*32000
                 shift_labels = testenc[:, (i * tmp_lm.seqlen) : ((i + 1) * tmp_lm.seqlen)][
                     :, 1:
