@@ -125,7 +125,7 @@ def RLQuant(
 
     
     # same input of first layer for fp model and quant model
-    quant_inps = inps
+    quant_inps = inps # 첫 번째 layer에 넣을 임베딩된 입력
     fp_inps = copy.deepcopy(inps)   # take output of fp model as input
     fp_inps_2 = copy.deepcopy(inps) if args.aug_loss else None # take output of quantization model as input
     
@@ -160,7 +160,7 @@ def RLQuant(
             with torch.no_grad():
                 with torch.cuda.amp.autocast():
                     for j in range(args.nsamples):
-                        fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                        fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0] # 현재 layer의 output 계산
                         if args.aug_loss:
                             fp_inps_2[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
 
@@ -178,7 +178,7 @@ def RLQuant(
             for name,module in qlayer.named_modules():
                 if isinstance(module, QuantLinear):
                     for key in pairs.keys():
-                        if key in name:
+                        if key in name: # "q_proj":"qkv" or "o_proj":"out" or "up_proj":"fc1"
                             act = act_scales[f"{layer_name_prefix}.{i}.{name}"].to(device=dev, dtype=dtype).clamp(min=1e-5) #4096
 
                             scale = (act/torch.log2(2+act)).clamp(min=1e-5) #weight
@@ -187,8 +187,8 @@ def RLQuant(
                             else:
                                 # shift = torch.zeros_like(scale)
                                 shift = torch.zeros_like(act)
-                            qlayer.register_parameter(f"{pairs[key]}_smooth_shift",torch.nn.Parameter(shift))
-                            qlayer.register_parameter(f"{pairs[key]}_smooth_scale",torch.nn.Parameter(scale))
+                            qlayer.register_parameter(f"{pairs[key]}_smooth_shift",torch.nn.Parameter(shift)) # zero point?
+                            qlayer.register_parameter(f"{pairs[key]}_smooth_scale",torch.nn.Parameter(scale)) # scaling factor
         
         if args.resume:
             qlayer.load_state_dict(rlq_parameters[i], strict=False)
@@ -207,13 +207,16 @@ def RLQuant(
                 for j in range(args.nsamples//args.batch_size):    
                     index = j * args.batch_size
                     # obtain output of quantization model
-                    with traincast():
+                    with traincast(): # 정밀도를 자동으로 맞춰줌
                         qlayer.smooth_and_quant_temporary()
-                        quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
-                        loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
+                        quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0] # 양자화된 layer output
+                        loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out) # line 163에서 계산된 full-precision output과 quantized output을 비교, LMSE
                         # loss2 = loss_func(ones_ops[index:index+args.batch_size,], quant_out_ones)
-                        cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs()
-                        loss -= torch.log(cos)
+                        
+                        # OmniQuant와 다른 부분
+                        cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs() # cosine similarity도 계산, LNLC == -log(cos)
+                        loss -= torch.log(cos) # LMSE + LNLC
+                        
                         if args.aug_loss:
                             loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
                     if not math.isfinite(loss.item()):
@@ -223,7 +226,7 @@ def RLQuant(
                         
                     loss_list.append(loss.data)
                     optimizer.zero_grad()
-                    norm = loss_scaler(loss, optimizer,parameters=qlayer.rlq_parameters(use_shift))
+                    norm = loss_scaler(loss, optimizer,parameters=qlayer.rlq_parameters(use_shift)) # 역전파 with auto scaling gradient, quantization parameter도 업데이트됨
                     norm_list.append(norm.data)
 
                 loss_mean = torch.stack(loss_list).mean()
@@ -240,7 +243,7 @@ def RLQuant(
             with torch.no_grad():
                 with torch.cuda.amp.autocast():
                     for j in range(args.nsamples):
-                        quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
+                        quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0] # 다음 layer에서 사용할 input 계산
             qlayer.register_scales_and_zeros()
             qlayer.half()
             layers[i] = qlayer.to("cpu")

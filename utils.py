@@ -30,7 +30,7 @@ class NativeScalerWithGradNormCount:
         self._scaler = torch.cuda.amp.GradScaler()
 
     def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True,retain_graph=False):
-        self._scaler.scale(loss).backward(create_graph=create_graph, retain_graph=retain_graph)
+        self._scaler.scale(loss).backward(create_graph=create_graph, retain_graph=retain_graph) # backpropagation때 quantization parameter들도 갱신됨
         if update_grad:
             if clip_grad is not None:
                 assert parameters is not None
