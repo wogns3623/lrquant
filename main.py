@@ -118,8 +118,8 @@ def evaluate(lm, args, logger, fp_lm):
             else:
                 testenc = testloader.input_ids
 
-            lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")))
-            lm.model.eval()
+            # lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")), strict=False)
+            # lm.model.eval()
 
             nsamples = testenc.numel() // lm.seqlen
             use_cache = lm.model.config.use_cache
@@ -130,7 +130,7 @@ def evaluate(lm, args, logger, fp_lm):
 
             if dataset != args.calib_dataset and args.tta:
                 # for tta
-                lm2 = copy.deepcopy(lm)
+                lm2 = copy.deepcopy(lm) # cannot deepcopy RLQLlamaRMSNorm.temp_
                 lm2.model = lm2.model.cpu()
                 lm2.model.config.use_cache = False
                 lm2.model.eval()
@@ -396,7 +396,7 @@ def main():
         )
         logger.info(time.time() - tick)
         # lm.model.eval()
-        # torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
+        torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
         
     if args.save_dir:
         # delete rlq parameters
@@ -414,7 +414,10 @@ def main():
                     del module.fc1_smooth_shift
                                
         lm.model.save_pretrained(args.save_dir)  
-        lm.tokenizer.save_pretrained(args.save_dir) 
+        lm.tokenizer.save_pretrained(args.save_dir)
+
+    lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")), strict=False)
+    lm.model.eval() # evaluation mode
     evaluate(lm, args, logger, fp_lm)
 
 
