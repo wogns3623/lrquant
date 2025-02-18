@@ -181,11 +181,13 @@ def RLQuant(
                         if key in name: # "q_proj":"qkv" or "o_proj":"out" or "up_proj":"fc1"
                             act = act_scales[f"{layer_name_prefix}.{i}.{name}"].to(device=dev, dtype=dtype).clamp(min=1e-5) #4096
 
+                            # s^0_i = max(|x_i|)/log_a(a + max(|x_i|)),
                             scale = (act/torch.log2(2+act)).clamp(min=1e-5) #weight
                             if use_shift and not is_llama:
                                 shift = act_shifts[f"{layer_name_prefix}.{i}.{name}"].to(device=dev, dtype=dtype)
                             else:
                                 # shift = torch.zeros_like(scale)
+                                # shift는 0으로 초기화, bias 양자화에만 사용됨
                                 shift = torch.zeros_like(act)
                             qlayer.register_parameter(f"{pairs[key]}_smooth_shift",torch.nn.Parameter(shift)) # zero point?
                             qlayer.register_parameter(f"{pairs[key]}_smooth_scale",torch.nn.Parameter(scale)) # scaling factor

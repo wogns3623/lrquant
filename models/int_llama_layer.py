@@ -282,15 +282,24 @@ class QuantLlamaDecoderLayer(nn.Module):
                 for name, module in self.named_parameters():
                     if "smooth_scale" in name:
                         module.data = truncate_number(module)
-                smooth_ln_fcs_temporary(self.input_layernorm,[self.self_attn.q_proj, self.self_attn.k_proj, self.self_attn.v_proj],
-                                        self.qkv_smooth_scale,self.qkv_smooth_shift) #4096
-                smooth_ln_fcs_temporary(self.post_attention_layernorm,[self.mlp.up_proj,self.mlp.gate_proj],
-                                        self.fc1_smooth_scale,self.fc1_smooth_shift) #4096
-                smooth_fc_fc_temporary(self.self_attn.v_proj,self.self_attn.o_proj,
-                                    self.out_smooth_scale, self.out_smooth_shift) #4096*4096
-                smooth_q_k_temporary(self.self_attn.q_proj, self.self_attn.k_proj,
-                                    self.qkt_smooth_scale) #4096*4096
-                self.mlp.down_proj.temp_weight = self.mlp.down_proj.weight
+            # shift & scale 양자화 파라미터 학습을 위해 양자화된 weight, bias를 계산함
+            # 이 과정에서 양자화 파라미터가 pytorch의 autograd 체인에 연결된다
+            # self.input_layernorm / self.qkv_smooth_scale
+            # self.self_attn.*_proj.weight * self.qkv_smooth_scale.view(1,-1)
+            smooth_ln_fcs_temporary(self.input_layernorm,[self.self_attn.q_proj, self.self_attn.k_proj, self.self_attn.v_proj],
+                                    self.qkv_smooth_scale,self.qkv_smooth_shift) #4096
+            smooth_ln_fcs_temporary(self.post_attention_layernorm,[self.mlp.up_proj,self.mlp.gate_proj],
+                                    self.fc1_smooth_scale,self.fc1_smooth_shift) #4096
+            # 특이한 점으로는 q, k는 qkv_, qkt_ 양자화 파라미터로  v는 qkv_, out_ 양자화 파라미터로 총 두번 양자화시킴?
+            # self.self_attn.v_proj.temp_weight / self.out_smooth_scale.view(-1,1)
+            # self.self_attn.o_proj.weight * self.out_smooth_scale.view(1,-1)
+            smooth_fc_fc_temporary(self.self_attn.v_proj,self.self_attn.o_proj,
+                                self.out_smooth_scale, self.out_smooth_shift) #4096*4096
+            # self.self_attn.q_proj.temp_weight / self.qkt_smooth_scale.view(1,-1)
+            # self.self_attn.k_proj.temp_weight * self.qkt_smooth_scale.view(1,-1)
+            smooth_q_k_temporary(self.self_attn.q_proj, self.self_attn.k_proj,
+                                self.qkt_smooth_scale) #4096*4096
+            self.mlp.down_proj.temp_weight = self.mlp.down_proj.weight
         else:
             for name, module in self.named_modules():
                 if isinstance(module, QuantLinear):

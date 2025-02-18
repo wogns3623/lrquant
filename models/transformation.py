@@ -41,33 +41,32 @@ def smooth_ln_fcs_temporary(ln, fcs, scales, shifts):
             fc.temp_bias = fc.weight@shifts
         fc.temp_weight = fc.weight * scales.view(1,-1)
 
-
-def smooth_fc_fc_temporary(fc1, fc2, scales,shifts=None):
+# v, o, out_ hyper parameter
+def smooth_fc_fc_temporary(v_proj, o_proj, scales,shifts=None):
     # only support for v_proj and out_proh now.
-    fc1.use_temporary_parameter = True
-    fc2.use_temporary_parameter = True
+    v_proj.use_temporary_parameter = True
+    o_proj.use_temporary_parameter = True
 
-    if hasattr(fc1, 'temp_weight'):
-        fc1.temp_bias = fc1.temp_bias - shifts
-        fc1.temp_bias = fc1.temp_bias/scales.view(-1)
-        fc1.temp_weight = fc1.temp_weight/scales.view(-1,1)
+    if hasattr(v_proj, 'temp_weight'):
+        v_proj.temp_bias = v_proj.temp_bias - shifts
+        v_proj.temp_bias = v_proj.temp_bias/scales.view(-1)
+        v_proj.temp_weight = v_proj.temp_weight/scales.view(-1,1)
     else:
-        fc1.temp_bias = fc1.bias/scales.view(-1)
-        fc1.temp_weight = fc1.weight/scales.view(-1,1)
+        v_proj.temp_bias = v_proj.bias/scales.view(-1)
+        v_proj.temp_weight = v_proj.weight/scales.view(-1,1)
     
-    if hasattr(fc2, 'bias') and fc2.bias is not None:
-        fc2.temp_bias = fc2.bias + fc2.weight@shifts
+    if hasattr(o_proj, 'bias') and o_proj.bias is not None:
+        o_proj.temp_bias = o_proj.bias + o_proj.weight@shifts
     else:
-        fc2.temp_bias = fc2.weight@shifts
-    fc2.temp_weight = fc2.weight * scales.view(1,-1)
+        o_proj.temp_bias = o_proj.weight@shifts
+    o_proj.temp_weight = o_proj.weight * scales.view(1,-1)
 
 
 def smooth_q_k_temporary(q_proj, k_proj, scales):
     q_proj.use_temporary_parameter = True
     k_proj.use_temporary_parameter = True
 
-    # scales = cal_log_scales(scales, act)    
-
+    # scales = cal_log_scales(scales, act)
     q_proj.temp_weight = q_proj.temp_weight/scales.view(-1,1)
     q_proj.temp_bias = q_proj.temp_bias/scales.view(-1)
     k_proj.temp_weight = k_proj.temp_weight*scales.view(-1,1)

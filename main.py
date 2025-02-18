@@ -58,7 +58,6 @@ net_choices = [
 @torch.no_grad()
 def evaluate(lm, args, logger, fp_lm):
     results = {}
-    # torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
     if args.multigpu:
         if "opt" in args.net.lower():
             map_layers_to_multi_gpus(lm.model.model.decoder.layers)
@@ -118,7 +117,6 @@ def evaluate(lm, args, logger, fp_lm):
             else:
                 testenc = testloader.input_ids
 
-            lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")))
             lm.model.eval()
 
             nsamples = testenc.numel() // lm.seqlen
@@ -271,6 +269,7 @@ def main():
     parser.add_argument("--act-scales", type=str, default=None)
     parser.add_argument("--act-shifts", type=str, default=None)
     parser.add_argument("--tta-shifts", type=str, default=None)
+    parser.add_argument("--use_saved",default=False, action="store_true", help="use saved model")
 
     args = parser.parse_args()
     random.seed(args.seed)
@@ -361,8 +360,10 @@ def main():
     if args.act_shifts is None:
         args.act_shifts = f'./act_shifts/{args.net}.pt'
 
+    if args.use_saved:
+        lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")), strict=False)
     # quantization
-    if args.wbits < 16 or args.abits <16:
+    elif args.wbits < 16 or args.abits <16:
         logger.info("=== start quantization ===")
         tick = time.time()     
         # load calibration dataset
@@ -395,8 +396,8 @@ def main():
             logger,
         )
         logger.info(time.time() - tick)
-        # lm.model.eval()
-        # torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
+        lm.model.eval()
+        torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
         
     if args.save_dir:
         # delete rlq parameters
@@ -412,9 +413,11 @@ def main():
                     del module.out_smooth_shift
                     del module.fc1_smooth_scale
                     del module.fc1_smooth_shift
-                               
+
         lm.model.save_pretrained(args.save_dir)  
-        lm.tokenizer.save_pretrained(args.save_dir) 
+        lm.tokenizer.save_pretrained(args.save_dir)
+
+    lm.model.eval() # evaluation mode
     evaluate(lm, args, logger, fp_lm)
 
 

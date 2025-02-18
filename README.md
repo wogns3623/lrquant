@@ -30,6 +30,13 @@ CUDA_VISIBLE_DEVICES=0 python main.py \
 --model ./huggingface/llama-2-7b-hf  \
 --epochs 20 --output_dir ./log/llama-2-7b-hf-w4a4 --save_dir ./output/llama-2-7b-hf-w4a4  \
 --eval_ppl --wbits 4 --abits 4 --lwc --let
+
+CUDA_VISIBLE_DEVICES=0 python main.py \
+--model ./huggingface/llama-2-7b-hf \
+--epochs 20 --output_dir ./log/llama-2-7b-hf-w4a4 \
+--wbits 4 --abits 4 --lwc --let \
+--use_saved --trust_remote_code=True \
+--tasks piqa,arc_easy,arc_challenge,boolq,hellaswag,winogrande
 ```
 
 ## Usage
