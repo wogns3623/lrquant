@@ -128,7 +128,7 @@ def evaluate(lm, args, logger, fp_lm):
 
             if dataset != args.calib_dataset and args.tta:
                 # for tta
-                lm2 = copy.deepcopy(lm)
+                lm2 = copy.deepcopy(lm) # cannot deepcopy RLQLlamaRMSNorm.temp_
                 lm2.model = lm2.model.cpu()
                 lm2.model.config.use_cache = False
                 lm2.model.eval()
