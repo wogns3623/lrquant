@@ -282,19 +282,35 @@ class QuantLlamaDecoderLayer(nn.Module):
                 for name, module in self.named_parameters():
                     if "smooth_scale" in name:
                         module.data = truncate_number(module)
-            # shift & scale 양자화 파라미터 학습을 위해 양자화된 weight, bias를 계산함
-            # 이 과정에서 양자화 파라미터가 pytorch의 autograd 체인에 연결된다
+                        
+            # shift & scale smooth 파라미터 학습을 위해 smooth된 weight, bias를 계산함
+            # 이 과정에서 smooth 파라미터가 pytorch의 autograd 체인에 연결된다
+            
+            # input_layernorm -> q,k,v
+            # (input_layernorm / qkv_smooth_scale) * (q|k|v * qkv_smooth_scale)
             # self.input_layernorm / self.qkv_smooth_scale
             # self.self_attn.*_proj.weight * self.qkv_smooth_scale.view(1,-1)
+            # input_layernorm -> self_attn.q_proj, self_attn.k_proj, self_attn.v_proj weight로 smooting이 일어남
             smooth_ln_fcs_temporary(self.input_layernorm,[self.self_attn.q_proj, self.self_attn.k_proj, self.self_attn.v_proj],
                                     self.qkv_smooth_scale,self.qkv_smooth_shift) #4096
+            
+            # post_attention_layernorm -> up_proj, gate_proj
             smooth_ln_fcs_temporary(self.post_attention_layernorm,[self.mlp.up_proj,self.mlp.gate_proj],
                                     self.fc1_smooth_scale,self.fc1_smooth_shift) #4096
+            
             # 특이한 점으로는 q, k는 qkv_, qkt_ 양자화 파라미터로  v는 qkv_, out_ 양자화 파라미터로 총 두번 양자화시킴?
+            # 아님. 각 컴포넌트 진행별로 이전 컴포넌트의 출력(activation)의 outlier를 다음 컴포넌트의 weight에 smoothing 시키는 과정이므로
+            # 컴포넌트 진행별로 여러번 smoothing이 일어나는 것
+            
+            # v -> o
+            # (v/scale^-1) * (o*scale) = v * o
             # self.self_attn.v_proj.temp_weight / self.out_smooth_scale.view(-1,1)
             # self.self_attn.o_proj.weight * self.out_smooth_scale.view(1,-1)
             smooth_fc_fc_temporary(self.self_attn.v_proj,self.self_attn.o_proj,
                                 self.out_smooth_scale, self.out_smooth_shift) #4096*4096
+            
+            # q -> k
+            # q/scale * k*scale = q * k
             # self.self_attn.q_proj.temp_weight / self.qkt_smooth_scale.view(1,-1)
             # self.self_attn.k_proj.temp_weight * self.qkt_smooth_scale.view(1,-1)
             smooth_q_k_temporary(self.self_attn.q_proj, self.self_attn.k_proj,

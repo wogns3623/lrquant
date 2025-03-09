@@ -90,10 +90,10 @@ class UniformAffineQuantizer(nn.Module):
             assert len(x.shape)==2, "only support linear layer now"
             dim1, dim2 = x.shape
             x = x.reshape(-1, self.group_size)
-        x_int = round_ste(x / scale)
+        x_int = round_ste(x / scale) # round(w/h)
         if round_zero_point is not None:
-            x_int = x_int.add(round_zero_point)
-        x_int = x_int.clamp(self.qmin, self.qmax)
+            x_int = x_int.add(round_zero_point) # + z
+        x_int = x_int.clamp(self.qmin, self.qmax) # clamp with qmin and qmax
         x_dequant = x_int
         if round_zero_point is not None:
             x_dequant = x_dequant.sub(round_zero_point)
@@ -131,19 +131,19 @@ class UniformAffineQuantizer(nn.Module):
         xmin = x.amin(reduce_shape, keepdim=True)
         xmax =  x.amax(reduce_shape, keepdim=True)
         if self.lwc:
-            xmax = self.sigmoid(self.upbound_factor)*xmax
-            xmin = self.sigmoid(self.lowbound_factor)*xmin
+            xmax = self.sigmoid(self.upbound_factor)*xmax # gamma * max(W)
+            xmin = self.sigmoid(self.lowbound_factor)*xmin # beta * min(W)
         if self.symmetric:
-            abs_max = torch.max(xmax.abs(),xmin.abs())
+            abs_max = torch.max(xmax.abs(),xmin.abs()) 
             scale = abs_max / (2**(self.n_bits-1)-1)
             self.scale = scale.clamp(min=CLIPMIN, max=1e4)
             zero_point = (2**(self.n_bits-1)-1)*torch.ones_like(self.scale)
         else:
-            range = xmax - xmin
-            scale = range / (2**self.n_bits-1)
-            self.scale = scale.clamp(min=CLIPMIN, max=1e4)
-            zero_point = -(xmin) / (self.scale)
-        self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
+            range = xmax - xmin # gamma * max(W) - beta * min(W)
+            scale = range / (2**self.n_bits-1) # (gamma * max(W) - beta * min(W)) / (2^bit-1)
+            self.scale = scale.clamp(min=CLIPMIN, max=1e4) # 최대 최소값 제한 1e-5 ~ 1e4
+            zero_point = -(xmin) / (self.scale) # -beta / h
+        self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round() # round(-beta/h)
         
     def register_scales_and_zeros(self):
         self.register_buffer('scales', self.scale)

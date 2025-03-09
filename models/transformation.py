@@ -36,10 +36,10 @@ def smooth_ln_fcs_temporary(ln, fcs, scales, shifts):
     for fc in fcs:
         fc.use_temporary_parameter = True
         if hasattr(fc, 'bias') and fc.bias is not None:
-            fc.temp_bias = fc.bias + fc.weight@shifts
+            fc.temp_bias = fc.bias + fc.weight@shifts # B' = B + z_s * W
         else:
             fc.temp_bias = fc.weight@shifts
-        fc.temp_weight = fc.weight * scales.view(1,-1)
+        fc.temp_weight = fc.weight * scales.view(1,-1) # W' = diag(s)W
 
 # v, o, out_ hyper parameter
 def smooth_fc_fc_temporary(v_proj, o_proj, scales,shifts=None):
@@ -49,7 +49,7 @@ def smooth_fc_fc_temporary(v_proj, o_proj, scales,shifts=None):
 
     if hasattr(v_proj, 'temp_weight'):
         v_proj.temp_bias = v_proj.temp_bias - shifts
-        v_proj.temp_bias = v_proj.temp_bias/scales.view(-1)
+        v_proj.temp_bias = v_proj.temp_bias/scales.view(-1) 
         v_proj.temp_weight = v_proj.temp_weight/scales.view(-1,1)
     else:
         v_proj.temp_bias = v_proj.bias/scales.view(-1)
@@ -96,7 +96,7 @@ def smooth_ln_fcs_inplace(ln, fcs, scales,shifts):
             fc.register_buffer('bias',fc.weight@shifts)
         fc.weight.mul_(scales.view(1,-1))
 
-
+# 
 def smooth_fc_fc_inplace(fc1, fc2, scales, shifts=None):
     # only support for v_proj and out_proh now.
     fc1.use_temporary_parameter = False
