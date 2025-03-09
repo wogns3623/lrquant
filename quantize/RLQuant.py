@@ -217,7 +217,7 @@ def RLQuant(
                         
                         # OmniQuant와 다른 부분
                         cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs() # cosine similarity도 계산, LNLC == -log(cos)
-                        loss -= torch.log(cos) # LMSE + LNLC
+                        loss -= args.lambda_nlc * torch.log(cos) # LMSE + lambda_nlc * LNLC
                         
                         if args.aug_loss:
                             loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
