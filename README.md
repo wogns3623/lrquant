@@ -26,16 +26,16 @@ huggingface-cli download meta-llama/Llama-2-7b-hf --local-dir ./huggingface/llam
 # run
 python generate_act_scale_shift.py --model ./huggingface/llama-2-7b-hf
 
-CUDA_VISIBLE_DEVICES=0 python main.py \
+CUDA_VISIBLE_DEVICES=0,1 python main.py \
 --model ./huggingface/llama-2-7b-hf  \
---epochs 20 --output_dir ./log/llama-2-7b-hf-w4a4 --save_dir ./output/llama-2-7b-hf-w4a4  \
---eval_ppl --wbits 4 --abits 4 --lwc --let
+--epochs 20 --output_dir ./log/llama-2-7b-hf-w4a4-base --save_dir ./output/llama-2-7b-hf-w4a4-base  \
+--eval_ppl --wbits 4 --abits 4 --lwc --let -multigpu
 
-CUDA_VISIBLE_DEVICES=0 python main.py \
+CUDA_VISIBLE_DEVICES=0,1 python main.py \
 --model ./huggingface/llama-2-7b-hf \
---epochs 20 --output_dir ./log/llama-2-7b-hf-w4a4 \
---wbits 4 --abits 4 --lwc --let \
---use_saved --trust_remote_code=True \
+--epochs 20 --output_dir ./log/llama-2-7b-hf-w4a4-base \
+--wbits 4 --abits 4 --lwc --let --multigpu \
+--use_saved \
 --tasks piqa,arc_easy,arc_challenge,boolq,hellaswag,winogrande
 ```
 
