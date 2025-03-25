@@ -28,6 +28,8 @@ except ImportError:
 import pdb
 
 import copy
+from dotenv import load_dotenv
+load_dotenv()
 
 
 torch.backends.cudnn.benchmark = True
@@ -302,6 +304,14 @@ def main():
     args.model_family = args.net.split('-')[0]
     lm = LMClass(args)
     lm.seqlen = 2048
+    logger.info(lm.model)
+    
+    if args.use_saved:
+        # lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")), strict=False)
+        lm.model.eval() # evaluation mode
+        evaluate(lm, args, logger, fp_lm)
+        return
+    
     lm.model.eval()
     for param in lm.model.parameters():
         param.requires_grad = False
@@ -360,10 +370,8 @@ def main():
     if args.act_shifts is None:
         args.act_shifts = f'./act_shifts/{args.net}.pt'
 
-    if args.use_saved:
-        lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")), strict=False)
     # quantization
-    elif args.wbits < 16 or args.abits <16:
+    if args.wbits < 16 or args.abits < 16:
         logger.info("=== start quantization ===")
         tick = time.time()     
         # load calibration dataset
@@ -396,26 +404,27 @@ def main():
             logger,
         )
         logger.info(time.time() - tick)
-        lm.model.eval()
-        torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
+        logger.info(lm.model)
+        # lm.model.eval()
+        # torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
         
-    if args.save_dir:
-        # delete rlq parameters
-        for name, module in lm.model.named_modules():
-            if isinstance(module, QuantLinear):
-                del module.weight_quantizer.lowbound_factor
-                del module.weight_quantizer.upbound_factor
-            if isinstance(module,QuantLlamaDecoderLayer) or isinstance(module,QuantOPTDecoderLayer):
-                if args.let:
-                    del module.qkv_smooth_scale
-                    del module.qkv_smooth_shift
-                    del module.out_smooth_scale
-                    del module.out_smooth_shift
-                    del module.fc1_smooth_scale
-                    del module.fc1_smooth_shift
+        if args.save_dir:
+            # delete rlq parameters
+            for name, module in lm.model.named_modules():
+                if isinstance(module, QuantLinear):
+                    del module.weight_quantizer.lowbound_factor
+                    del module.weight_quantizer.upbound_factor
+                if isinstance(module,QuantLlamaDecoderLayer) or isinstance(module,QuantOPTDecoderLayer):
+                    if args.let:
+                        del module.qkv_smooth_scale
+                        del module.qkv_smooth_shift
+                        del module.out_smooth_scale
+                        del module.out_smooth_shift
+                        del module.fc1_smooth_scale
+                        del module.fc1_smooth_shift
 
-        lm.model.save_pretrained(args.save_dir)  
-        lm.tokenizer.save_pretrained(args.save_dir)
+            lm.model.save_pretrained(args.save_dir)  
+            lm.tokenizer.save_pretrained(args.save_dir)
 
     lm.model.eval() # evaluation mode
     evaluate(lm, args, logger, fp_lm)

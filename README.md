@@ -29,7 +29,7 @@ python generate_act_scale_shift.py --model ./huggingface/llama-2-7b-hf
 CUDA_VISIBLE_DEVICES=0,1 python main.py \
 --model ./huggingface/llama-2-7b-hf  \
 --epochs 20 --output_dir ./log/llama-2-7b-hf-w4a4-base --save_dir ./output/llama-2-7b-hf-w4a4-base  \
---eval_ppl --wbits 4 --abits 4 --lwc --let -multigpu
+--eval_ppl --wbits 4 --abits 4 --lwc --let --multigpu
 
 CUDA_VISIBLE_DEVICES=0,1 python main.py \
 --model ./huggingface/llama-2-7b-hf \
