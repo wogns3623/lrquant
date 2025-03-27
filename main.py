@@ -274,6 +274,7 @@ def main():
     parser.add_argument("--act-shifts", type=str, default=None)
     parser.add_argument("--tta-shifts", type=str, default=None)
     parser.add_argument("--use_saved", default=False, action="store_true", help="use saved model")
+    parser.add_argument("--use_saved_layer", type=int, default=0, help="use saved layer quantization parameters until given number layer reached. using with resume")
 
     args = parser.parse_args()
     random.seed(args.seed)

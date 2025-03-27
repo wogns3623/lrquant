@@ -194,7 +194,9 @@ def RLQuant(
         if args.resume:
             qlayer.load_state_dict(rlq_parameters[i], strict=False)
         
-        if args.epochs > 0:
+        if args.use_saved_layer is not None and i < args.use_saved_layer:
+            logger.info(f"layer {i} reuse saved layer quantization parameters")
+        elif args.epochs > 0:
             with torch.no_grad():
                 qlayer.float()      # required for AMP training
             # create optimizer
@@ -215,7 +217,8 @@ def RLQuant(
                         # loss2 = loss_func(ones_ops[index:index+args.batch_size,], quant_out_ones)
                         
                         # OmniQuant와 다른 부분
-                        cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs() # cosine similarity도 계산, LNLC == -log(cos)
+                        # cosine similarity도 계산, LNLC == -log(cos)
+                        cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs()
                         loss -= torch.log(cos) # LMSE + LNLC
                         
                         if args.aug_loss:
@@ -261,7 +264,7 @@ def RLQuant(
             for name, module in named_linears.items():
                 scales = module.weight_quantizer.scales
                 zeros = module.weight_quantizer.zeros
-                group_size = module.weight_quantizer.group_size
+                group_size = -1 if module.weight_quantizer.group_size is None else module.weight_quantizer.group_size
                 dim0 = module.weight.shape[0]
                 scales = scales.view(dim0,-1)
                 zeros = zeros.view(dim0,-1)
