@@ -147,7 +147,6 @@ def RLQuant(
     
     for i in range(len(layers)):
         logger.info(f"=== Start quantize layer {i} ===")
-        print(len(layers))
         
         layer = layers[i].to(dev)
         qlayer = DecoderLayer(lm.model.config, layer, args)

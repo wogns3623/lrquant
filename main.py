@@ -189,12 +189,14 @@ def evaluate(lm, args, logger, fp_lm):
             tmp_lm.model.eval()        
     
     if args.tasks != "":
+        lm.model.to(lm.device)
         t_results = evaluator.simple_evaluate(
             lm,
             tasks=args.tasks,
             num_fewshot=args.num_fewshot,
             limit=None if args.limit == -1 else args.limit,
         )
+        lm.model.cpu()
         results.update(t_results)
         logger.info(results)
         pprint(results)
@@ -304,13 +306,6 @@ def main():
     args.model_family = args.net.split('-')[0]
     lm = LMClass(args)
     lm.seqlen = 2048
-    logger.info(lm.model)
-    
-    if args.use_saved:
-        # lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")), strict=False)
-        lm.model.eval() # evaluation mode
-        evaluate(lm, args, logger, fp_lm)
-        return
     
     lm.model.eval()
     for param in lm.model.parameters():
@@ -321,6 +316,11 @@ def main():
     for fp_param in fp_lm.model.parameters():
         fp_param.requires_grad = False
 
+    if args.use_saved:
+        # lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")), strict=False)
+        lm.model.eval() # evaluation mode
+        evaluate(lm, args, logger, fp_lm)
+        return
 
     args.weight_quant_params = {
         "n_bits": args.wbits,
@@ -404,7 +404,6 @@ def main():
             logger,
         )
         logger.info(time.time() - tick)
-        logger.info(lm.model)
         # lm.model.eval()
         # torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
         
