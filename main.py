@@ -275,6 +275,7 @@ def main():
     parser.add_argument("--tta-shifts", type=str, default=None)
     parser.add_argument("--use_saved", default=False, action="store_true", help="use saved model")
     parser.add_argument("--use_saved_layer", type=int, default=0, help="use saved layer quantization parameters until given number layer reached. using with resume")
+    parser.add_argument("--nlc_softmax_weighted", default=False, action="store_true")
 
     args = parser.parse_args()
     random.seed(args.seed)

@@ -218,7 +218,26 @@ def RLQuant(
                         
                         # OmniQuant와 다른 부분
                         # cosine similarity도 계산, LNLC == -log(cos)
-                        cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs()
+                        cos = cossim(quant_out,fp_inps[index:index+args.batch_size,])
+
+                        if args.nlc_softmax_weighted:
+                            if i == len(layers)-1:
+                                model.lm_head.to(dev)
+                                with torch.no_grad(): # lm_head weight 달라지는지 확인 
+                                    lm_head_out = model.lm_head(quant_out)
+                                    softmax_pred = torch.softmax(lm_head_out, 2)
+                                    softmax_pred_max = torch.max(softmax_pred, 2).values
+                                    cos *= softmax_pred_max
+                                    
+                                    # mse loss 비율도 조정?
+                                    # loss *= 1-softmax_pred_max
+                                    
+                                    # nlc loss의 비율을 반대로 조정?
+                                    # cos *= 1-softmax_pred_max
+                                    # loss *= softmax_pred_max
+                        
+                        cos = cos.mean().abs()
+
                         loss -= torch.log(cos) # LMSE + LNLC
                         
                         if args.aug_loss:
