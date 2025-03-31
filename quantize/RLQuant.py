@@ -213,12 +213,13 @@ def RLQuant(
                     with traincast(): # 정밀도를 자동으로 맞춰줌
                         qlayer.smooth_and_quant_temporary()
                         quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0] # 양자화된 layer output
-                        loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out) # line 163에서 계산된 full-precision output과 quantized output을 비교, LMSE
+                        mse_loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out) # line 163에서 계산된 full-precision output과 quantized output을 비교, LMSE
                         # loss2 = loss_func(ones_ops[index:index+args.batch_size,], quant_out_ones)
                         
                         # OmniQuant와 다른 부분
                         # cosine similarity도 계산, LNLC == -log(cos)
-                        cos = cossim(quant_out,fp_inps[index:index+args.batch_size,])
+                        cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs()
+                        nlc_loss = -torch.log(cos)
 
                         if args.nlc_softmax_weighted:
                             if i == len(layers)-1:
@@ -227,18 +228,21 @@ def RLQuant(
                                     lm_head_out = model.lm_head(quant_out)
                                     softmax_pred = torch.softmax(lm_head_out, 2)
                                     softmax_pred_max = torch.max(softmax_pred, 2).values
-                                    cos *= softmax_pred_max
+                                    nlc_weight = softmax_pred_max.mean().abs()
+                                    logger.info(f"layer {i} iter {epochs} batch index {index} nlc_weight:{nlc_weight}")
+                                    nlc_loss *= nlc_weight
                                     
                                     # mse loss 비율도 조정?
-                                    # loss *= 1-softmax_pred_max
+                                    # softmax_pred_max는 입력 차원(2048)의 각 토큰별로 가장 높은 예측
+                                    if args.mse_softmax_weighted:
+                                        mse_weight = 1 - nlc_weight
+                                        mse_loss *= mse_weight
                                     
                                     # nlc loss의 비율을 반대로 조정?
                                     # cos *= 1-softmax_pred_max
                                     # loss *= softmax_pred_max
                         
-                        cos = cos.mean().abs()
-
-                        loss -= torch.log(cos) # LMSE + LNLC
+                        loss = mse_loss + nlc_loss # LMSE + LNLC
                         
                         if args.aug_loss:
                             loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
