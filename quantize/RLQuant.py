@@ -221,31 +221,38 @@ def RLQuant(
                         cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs()
                         nlc_loss = -torch.log(cos)
 
-                        if args.nlc_softmax_weighted:
+                        if args.softmax_weighted is not None:
                             if i == len(layers)-1:
                                 model.lm_head.to(dev)
                                 with torch.no_grad(): # lm_head weight 달라지는지 확인 
                                     lm_head_out = model.lm_head(quant_out)
                                     softmax_pred = torch.softmax(lm_head_out, 2)
                                     softmax_pred_max = torch.max(softmax_pred, 2).values
-                                    nlc_weight = softmax_pred_max.mean().abs()
-                                    logger.info(f"layer {i} iter {epochs} batch index {index} nlc_weight:{nlc_weight}")
-                                    nlc_loss *= nlc_weight
-                                    
-                                    # mse loss 비율도 조정?
-                                    # softmax_pred_max는 입력 차원(2048)의 각 토큰별로 가장 높은 예측
-                                    if args.mse_softmax_weighted:
-                                        mse_weight = 1 - nlc_weight
-                                        mse_loss *= mse_weight
-                                    
-                                    # nlc loss의 비율을 반대로 조정?
-                                    # cos *= 1-softmax_pred_max
-                                    # loss *= softmax_pred_max
+                                    pred_weight = softmax_pred_max.mean().abs()
+                                    # logger.info(f"layer {i} iter {epochs} batch index {index} prediction weight:{pred_weight}")
+                                    if args.softmax_weighted == "each":
+                                        nlc_loss *= pred_weight
+                                        # mse loss 비율도 조정?
+                                        # softmax_pred_max는 입력 차원(2048)의 각 토큰별로 가장 높은 예측
+                                        mse_loss *= 1 - pred_weight
+                                    elif args.softmax_weighted == "each_reverse":
+                                        # nlc loss의 비율을 반대로 조정?
+                                        nlc_loss *= 1 - pred_weight
+                                        mse_loss *= pred_weight
+                                    elif args.softmax_weighted == "loss":
+                                        nlc_loss *= pred_weight
+                                        mse_loss *= pred_weight
+                                    else:
+                                        # treated as None
+                                        pass
+                                        
                         
                         loss = mse_loss + nlc_loss # LMSE + LNLC
                         
                         if args.aug_loss:
                             loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
+                            
+                        loss *= args.loss_scale
                     if not math.isfinite(loss.item()):
                         logger.info("Loss is NAN, stopping training")
                         # quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]
