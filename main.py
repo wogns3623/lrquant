@@ -277,6 +277,7 @@ def main():
     parser.add_argument("--use_saved_layer", type=int, default=0, help="use saved layer quantization parameters until given number layer reached. using with resume")
     parser.add_argument("--loss_scale", type=float, default=1)
     parser.add_argument("--softmax_weighted", type=str, default=None, choices=["each", "each_reverse", "loss"])
+    parser.add_argument("--wmse", default=False, action="store_true", help="use weighted mse")
 
     args = parser.parse_args()
     random.seed(args.seed)

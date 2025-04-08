@@ -12,6 +12,8 @@ import os
 import pdb
 import gc
 
+from quantize.weighted_mse import SELoss
+
 
 
 def get_named_linears(module):
@@ -132,7 +134,9 @@ def RLQuant(
 
     attention_mask = cache["attention_mask"]
     attention_mask_batch = attention_mask.repeat(args.batch_size,1,1,1) if args.deactive_amp else attention_mask.repeat(args.batch_size,1,1,1).float()
-    loss_func = torch.nn.MSELoss()
+    # loss_func = torch.nn.MSELoss()
+    # SE 구해서 평균 나중에 내기?
+    loss_func = SELoss()
     # loss_func = torch.nn.L1Loss()
     if is_llama:
         position_ids = cache["position_ids"]
@@ -213,41 +217,47 @@ def RLQuant(
                     with traincast(): # 정밀도를 자동으로 맞춰줌
                         qlayer.smooth_and_quant_temporary()
                         quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0] # 양자화된 layer output
-                        mse_loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out) # line 163에서 계산된 full-precision output과 quantized output을 비교, LMSE
+                        se_loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out) # line 163에서 계산된 full-precision output과 quantized output을 비교, LMSE
                         # loss2 = loss_func(ones_ops[index:index+args.batch_size,], quant_out_ones)
+                        mse_loss = se_loss.mean(2)
                         
                         # OmniQuant와 다른 부분
                         # cosine similarity도 계산, LNLC == -log(cos)
-                        cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs()
-                        nlc_loss = -torch.log(cos)
+                        
+                        # 1. mean해서 log씌우는거랑 log씌워서 mean하는거랑 다르지 않나?
+                        # 2. 만일 그럴일은 없겠지만 abs 취했을때 반대방향 벡터의 손실도 0으로 수렴해버림
+                        # cos = cossim(fp_inps[index:index+args.batch_size,], quant_out).mean().abs()
+                        # nlc_loss = -torch.log(cos)
+                        
+                        # abs 대신 cossim 값을 0~1로 매핑함
+                        cos = cossim(fp_inps[index:index+args.batch_size,], quant_out)
+                        nlc_loss = -torch.log((cos + 1)/2)
 
                         if args.softmax_weighted is not None:
                             if i == len(layers)-1:
                                 model.lm_head.to(dev)
                                 with torch.no_grad(): # lm_head weight 달라지는지 확인 
                                     lm_head_out = model.lm_head(quant_out)
-                                    softmax_pred = torch.softmax(lm_head_out, 2)
-                                    softmax_pred_max = torch.max(softmax_pred, 2).values
-                                    pred_weight = softmax_pred_max.mean().abs()
-                                    # logger.info(f"layer {i} iter {epochs} batch index {index} prediction weight:{pred_weight}")
+                                    softmax_pred = torch.softmax(lm_head_out, 2) # [1, 2048, 32000]
+                                    softmax_pred_max = torch.max(softmax_pred, 2).values # [1, 2048]
+                                    # softmax_pred_max는 입력 차원(2048)의 각 토큰별로 가장 높은 예측
+                                    # logger.info(f"layer {i} iter {epochs} batch index {index} prediction weight:{softmax_pred_max}")
+                                    # mse loss 비율도 조정?
                                     if args.softmax_weighted == "each":
-                                        nlc_loss *= pred_weight
-                                        # mse loss 비율도 조정?
-                                        # softmax_pred_max는 입력 차원(2048)의 각 토큰별로 가장 높은 예측
-                                        mse_loss *= 1 - pred_weight
+                                        nlc_loss *= softmax_pred_max
+                                        mse_loss *= 1 - softmax_pred_max
                                     elif args.softmax_weighted == "each_reverse":
                                         # nlc loss의 비율을 반대로 조정?
-                                        nlc_loss *= 1 - pred_weight
-                                        mse_loss *= pred_weight
+                                        nlc_loss *= 1 - softmax_pred_max
+                                        mse_loss *= softmax_pred_max
                                     elif args.softmax_weighted == "loss":
-                                        nlc_loss *= pred_weight
-                                        mse_loss *= pred_weight
+                                        nlc_loss *= softmax_pred_max
+                                        mse_loss *= softmax_pred_max
                                     else:
                                         # treated as None
                                         pass
-                                        
-                        
-                        loss = mse_loss + nlc_loss # LMSE + LNLC
+
+                        loss = (mse_loss + nlc_loss).mean() # LMSE + LNLC
                         
                         if args.aug_loss:
                             loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
