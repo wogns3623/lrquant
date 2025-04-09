@@ -11,6 +11,7 @@ import utils
 import os
 import pdb
 import gc
+import typing
 
 from quantize.weighted_mse import SELoss
 
@@ -209,6 +210,8 @@ def RLQuant(
             loss_scaler = utils.NativeScalerWithGradNormCount()
                    
             for epochs in range(args.epochs):
+                prev_lm_head_params = None
+                
                 loss_list = []
                 norm_list = []
                 for j in range(args.nsamples//args.batch_size):    
@@ -217,7 +220,7 @@ def RLQuant(
                     with traincast(): # 정밀도를 자동으로 맞춰줌
                         qlayer.smooth_and_quant_temporary()
                         quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0] # 양자화된 layer output
-                        se_loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out) # line 163에서 계산된 full-precision output과 quantized output을 비교, LMSE
+                        se_loss: torch.Tensor = loss_func(fp_inps[index:index+args.batch_size,], quant_out) # line 163에서 계산된 full-precision output과 quantized output을 비교, LMSE
                         # loss2 = loss_func(ones_ops[index:index+args.batch_size,], quant_out_ones)
                         mse_loss = se_loss.mean(2)
                         
@@ -232,32 +235,75 @@ def RLQuant(
                         # abs 대신 cossim 값을 0~1로 매핑함
                         cos = cossim(fp_inps[index:index+args.batch_size,], quant_out)
                         nlc_loss = -torch.log((cos + 1)/2)
+                        
+                        loss: torch.Tensor = None
 
-                        if args.softmax_weighted is not None:
+                        if args.softmax_weighted is None:
+                            loss = (mse_loss + nlc_loss).mean()
+                        else:
                             if i == len(layers)-1:
+                                model.lm_head = typing.cast(nn.Linear, model.lm_head)
                                 model.lm_head.to(dev)
-                                with torch.no_grad(): # lm_head weight 달라지는지 확인 
+                                
+                                print("model.lm_head.weight", model.lm_head.weight)
+                                if prev_lm_head_params is not None:
+                                    print("model.lm_head.weight same:", torch.equal(prev_lm_head_params, model.lm_head.weight))
+                                prev_lm_head_params = model.lm_head.weight.detach().clone()
+                                
+                                if args.no_grad:
                                     lm_head_out = model.lm_head(quant_out)
+                                    
                                     softmax_pred = torch.softmax(lm_head_out, 2) # [1, 2048, 32000]
                                     softmax_pred_max = torch.max(softmax_pred, 2).values # [1, 2048]
                                     # softmax_pred_max는 입력 차원(2048)의 각 토큰별로 가장 높은 예측
-                                    # logger.info(f"layer {i} iter {epochs} batch index {index} prediction weight:{softmax_pred_max}")
+                                    print(f"layer {i} iter {epochs} batch index {index} prediction weight:{softmax_pred_max}")
                                     # mse loss 비율도 조정?
                                     if args.softmax_weighted == "each":
                                         nlc_loss *= softmax_pred_max
                                         mse_loss *= 1 - softmax_pred_max
+                                        loss = (mse_loss + nlc_loss).mean()
                                     elif args.softmax_weighted == "each_reverse":
                                         # nlc loss의 비율을 반대로 조정?
                                         nlc_loss *= 1 - softmax_pred_max
                                         mse_loss *= softmax_pred_max
+                                        loss = (mse_loss + nlc_loss).mean()
                                     elif args.softmax_weighted == "loss":
                                         nlc_loss *= softmax_pred_max
                                         mse_loss *= softmax_pred_max
+                                        loss = (mse_loss + nlc_loss).mean()
                                     else:
                                         # treated as None
                                         pass
-
-                        loss = (mse_loss + nlc_loss).mean() # LMSE + LNLC
+                                else:
+                                    with torch.no_grad(): # lm_head weight 달라지는지 확인
+                                        lm_head_out = model.lm_head(quant_out)
+                                        
+                                        softmax_pred = torch.softmax(lm_head_out, 2) # [1, 2048, 32000]
+                                        softmax_pred_max = torch.max(softmax_pred, 2).values # [1, 2048]
+                                        # softmax_pred_max는 입력 차원(2048)의 각 토큰별로 가장 높은 예측
+                                        print(f"layer {i} iter {epochs} batch index {index} prediction weight:{softmax_pred_max}")
+                                        # mse loss 비율도 조정?
+                                        if args.softmax_weighted == "each":
+                                            nlc_loss *= softmax_pred_max
+                                            mse_loss *= 1 - softmax_pred_max
+                                            loss = (mse_loss + nlc_loss).mean()
+                                        # if args.softmax_weighted == "each-wmean": # TODO: 가중평균?
+                                        #     loss_weight = torch.tensor([softmax_pred_max, 1 - softmax_pred_max])
+                                        #     (x*loss_weight).sum() / loss_weight.sum()
+                                        #     loss = weighted_mean([softmax_pred_max, 1 - softmax_pred_max], [nlc_loss, mse_loss])
+                                        elif args.softmax_weighted == "each_reverse":
+                                            # nlc loss의 비율을 반대로 조정?
+                                            nlc_loss *= 1 - softmax_pred_max
+                                            mse_loss *= softmax_pred_max
+                                            loss = (mse_loss + nlc_loss).mean()
+                                        elif args.softmax_weighted == "loss":
+                                            nlc_loss *= softmax_pred_max
+                                            mse_loss *= softmax_pred_max
+                                            loss = (mse_loss + nlc_loss).mean()
+                                        else:
+                                            # treated as None
+                                            pass
+                        
                         
                         if args.aug_loss:
                             loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
