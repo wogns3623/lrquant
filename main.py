@@ -438,6 +438,14 @@ def main():
     evaluate(lm, args, logger, fp_lm)
 
 
+from cProfile import Profile
+
 if __name__ == "__main__":
     print(sys.argv)
-    main()
+    if sys.argv.__contains__('--profile'):
+        sys.argv.remove('--profile')
+        profiler = Profile()
+        profiler.runcall(main)
+        profiler.dump_stats('profile.prof')
+    else:
+        main()
