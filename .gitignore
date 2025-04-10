@@ -21,3 +21,4 @@ temp.sh
 .venv
 
 profile_results/
+.vscode
