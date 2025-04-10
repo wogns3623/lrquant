@@ -100,7 +100,7 @@ def evaluate(lm, args, logger, fp_lm):
 
     if args.eval_ppl:
         for dataset in ["wikitext2","ptb","c4","ptb-new",'c4-new']:
-            cache_testloader = f'{args.cache_dir}/testloader_{args.model_family}_{dataset}_all.cache'                   
+            cache_testloader = f'{args.cache_dir}/testloader_{dataset}_all.cache'                   
 
             if os.path.exists(cache_testloader):
                 testloader = torch.load(cache_testloader)
@@ -237,6 +237,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, help="model name of model path")
     parser.add_argument("--cache_dir", default="./cache", type=str, help="cache dir of dataset, leading to faster debug")
+    parser.add_argument("--input_cache_dir", default=None, type=str, help="cache dir of input from dataset, leading to faster debug")
     parser.add_argument("--output_dir", default="../log/", type=str, help="direction of logging file")
     parser.add_argument("--save_dir", default=None, type=str, help="direction for saving fake quantization model")
     parser.add_argument("--resume", type=str, default=None)
@@ -292,10 +293,6 @@ def main():
     # init logger
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    if args.cache_dir:
-        Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
-    if args.save_dir:
-        Path(args.save_dir).mkdir(parents=True, exist_ok=True)
     output_dir = Path(args.output_dir)
     logger = utils.create_logger(output_dir)
     logger.info(args)
@@ -307,6 +304,17 @@ def main():
     args.model_family = args.net.split('-')[0]
     lm = LMClass(args)
     lm.seqlen = 2048
+
+    if args.cache_dir:
+        args.cache_dir = os.path.join(args.cache_dir, args.model_family)
+        Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
+
+        if args.input_cache_dir is None:
+            args.input_cache_dir = os.path.join(args.cache_dir, f'{args.calib_dataset}_{args.nsamples}')
+        Path(args.input_cache_dir).mkdir(parents=True, exist_ok=True)
+    
+    if args.save_dir:
+        Path(args.save_dir).mkdir(parents=True, exist_ok=True)
     
     lm.model.eval()
     for param in lm.model.parameters():
@@ -376,7 +384,7 @@ def main():
         logger.info("=== start quantization ===")
         tick = time.time()     
         # load calibration dataset
-        cache_dataloader = f'{args.cache_dir}/dataloader_{args.model_family}_{args.calib_dataset}_{args.nsamples}.cache'
+        cache_dataloader = f'{args.input_cache_dir}/dataloader.cache'
         if os.path.exists(cache_dataloader):
             dataloader = torch.load(cache_dataloader)
             logger.info(f"load calibration from {cache_dataloader}")
