@@ -1,13 +1,13 @@
+import typing
 import transformers
 import torch
 from .models_utils import BaseLM, find_layers
-from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM, LlamaForCausalLM, OPTForCausalLM
 import torch.nn.functional as F
 from torch import nn
 import torch
 from tqdm import tqdm
 import pdb
-
 
 class LMClass(BaseLM):
     def __init__(self, args):
@@ -23,7 +23,7 @@ class LMClass(BaseLM):
         config = AutoConfig.from_pretrained(args.model)
         self.tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False,legacy=False)
         # self.model = AutoModelForCausalLM.from_pretrained(args.model, config=config, device_map='cpu',torch_dtype=config.torch_dtype)
-        self.model = AutoModelForCausalLM.from_pretrained(args.model, config=config, device_map='cpu',torch_dtype=torch.float16)
+        self.model = typing.cast(LlamaForCausalLM | OPTForCausalLM, AutoModelForCausalLM.from_pretrained(args.model, config=config, device_map='cpu',torch_dtype=torch.float16))
         self.seqlen = self.model.config.max_position_embeddings
         self.model.eval()
         self.vocab_size = self.tokenizer.vocab_size
