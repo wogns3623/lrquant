@@ -15,6 +15,7 @@ import typing
 
 from quantize.weighted_mse import SELoss
 
+from models.LMClass import LMClass
 
 
 def get_named_linears(module):
@@ -22,7 +23,7 @@ def get_named_linears(module):
 
 
 def RLQuant(
-    lm,
+    lm: LMClass,
     args,
     dataloader,
     act_scales,
@@ -40,8 +41,6 @@ def RLQuant(
     if "llama" in args.net.lower():
         is_llama = True
         layers = model.model.layers
-        model.model.embed_tokens = model.model.embed_tokens.to(dev)
-        model.model.norm = model.model.norm.to(dev)
         DecoderLayer = QuantLlamaDecoderLayer
         pairs = {
             "q_proj":"qkv",
@@ -51,13 +50,6 @@ def RLQuant(
         layer_name_prefix = "model.layers"
     elif "opt" in args.net.lower():
         layers = model.model.decoder.layers
-        print(layers)
-        model.model.decoder.embed_tokens = model.model.decoder.embed_tokens.to(dev)
-        model.model.decoder.embed_positions = model.model.decoder.embed_positions.to(dev)
-        if hasattr(model.model.decoder, "project_out") and model.model.decoder.project_out:
-            model.model.decoder.project_out = model.model.decoder.project_out.to(dev)
-        if hasattr(model.model.decoder, "project_in") and model.model.decoder.project_in:
-            model.model.decoder.project_in = model.model.decoder.project_in.to(dev)
         DecoderLayer = QuantOPTDecoderLayer
         pairs = {
             "q_proj":"qkv",
@@ -68,8 +60,6 @@ def RLQuant(
     else:
         raise ValueError("Only support for opt/llama/Llama-2 now")
     
-    
-    layers[0] = layers[0].to(dev)
     print("------------")
     if args.deactive_amp and args.epochs>0:
         dtype = torch.float
@@ -77,72 +67,106 @@ def RLQuant(
     else:
         dtype = torch.float16
         traincast = torch.cuda.amp.autocast
-    inps = torch.zeros(
-        (args.nsamples, lm.seqlen, model.config.hidden_size), dtype=dtype, device=dev
-    )
 
-    cache = {"i": 0}
-    # catch the first layer input 
-    class Catcher(nn.Module):
-        def __init__(self, module):
-            super().__init__()
-            self.module = module
-            self.is_llama = False
-
-        def forward(self, inp, **kwargs):
-            inps[cache["i"]] = inp
-            cache["i"] += 1
-            cache["attention_mask"] = kwargs["attention_mask"]
-            if self.is_llama:
-                cache["position_ids"] = kwargs["position_ids"]
-            raise ValueError
-
-    layers[0] = Catcher(layers[0])
-    layers[0].is_llama = is_llama
-
-    with torch.no_grad():
-        for batch in dataloader:
-            if cache["i"] >= args.nsamples:
-                break
-            try:
-                model(batch[0].to(dev))
-            except ValueError:
-                pass
+    inps: torch.Tensor = None
+    attention_mask: torch.Tensor = None
+    position_ids: torch.Tensor | None = None
     
-    # move embedding layer and first layer to cpu
-    layers[0] = layers[0].module
-    layers[0] = layers[0].cpu()
-    if "llama" in args.net.lower():
-        model.model.embed_tokens = model.model.embed_tokens.cpu()
-        model.model.norm = model.model.norm.cpu()
-    elif "opt" in args.net.lower():
-        model.model.decoder.embed_tokens = model.model.decoder.embed_tokens.cpu()
-        model.model.decoder.embed_positions = model.model.decoder.embed_positions.cpu()
-        if hasattr(model.model.decoder, "project_out") and model.model.decoder.project_out:
-            model.model.decoder.project_out = model.model.decoder.project_out.cpu()
-        if hasattr(model.model.decoder, "project_in") and model.model.decoder.project_in:
-            model.model.decoder.project_in = model.model.decoder.project_in.cpu()
-    else:
-        raise ValueError("Only support for opt/llama/Llama-2 now")
-    torch.cuda.empty_cache()
+    cache_inps = f'{args.input_cache_dir}/inps_0.cache'
+    if os.path.exists(cache_inps):
+        # inps = torch.load(cache_inps, map_location=dev)
+        inps = torch.load(cache_inps)
+        logger.info(f"load inps_0 from {cache_inps}")
+    
+    cache_attention_mask = f'{args.input_cache_dir}/attention_mask.cache'
+    if os.path.exists(cache_attention_mask):
+        attention_mask = torch.load(cache_attention_mask)
+        logger.info(f"load attention_mask from {cache_attention_mask}")
+        
+    cache_position_ids = f'{args.input_cache_dir}/position_ids.cache'
+    if is_llama and os.path.exists(cache_position_ids):
+            position_ids = torch.load(cache_position_ids)
+            logger.info(f"load position_ids from {cache_position_ids}")
+    
+    if inps is None or attention_mask is None or (is_llama and position_ids is None):
+        inps = torch.zeros(
+            (args.nsamples, lm.seqlen, model.config.hidden_size), dtype=dtype, device=dev
+        )
+        if "llama" in args.net.lower():
+            model.model.embed_tokens = model.model.embed_tokens.to(dev)
+            model.model.norm = model.model.norm.to(dev)
+        elif "opt" in args.net.lower():
+            model.model.decoder.embed_tokens = model.model.decoder.embed_tokens.to(dev)
+            model.model.decoder.embed_positions = model.model.decoder.embed_positions.to(dev)
+            if hasattr(model.model.decoder, "project_out") and model.model.decoder.project_out:
+                model.model.decoder.project_out = model.model.decoder.project_out.to(dev)
+            if hasattr(model.model.decoder, "project_in") and model.model.decoder.project_in:
+                model.model.decoder.project_in = model.model.decoder.project_in.to(dev)
 
+        layers[0] = layers[0].to(dev)
+
+        cache = {"i": 0}
+        # catch the first layer input 
+        class Catcher(nn.Module):
+            def __init__(self, module):
+                super().__init__()
+                self.module = module
+                self.is_llama = False
+
+            def forward(self, inp, **kwargs):
+                inps[cache["i"]] = inp
+                cache["i"] += 1
+                cache["attention_mask"] = kwargs["attention_mask"]
+                if self.is_llama:
+                    cache["position_ids"] = kwargs["position_ids"]
+                raise ValueError
+
+        layers[0] = Catcher(layers[0])
+        layers[0].is_llama = is_llama
+
+        with torch.no_grad():
+            for batch in dataloader:
+                if cache["i"] >= args.nsamples:
+                    break
+                try:
+                    model(batch[0].to(dev))
+                except ValueError:
+                    pass
+    
+        # move embedding layer and first layer to cpu
+        layers[0] = layers[0].module
+        layers[0] = layers[0].cpu()
+        if "llama" in args.net.lower():
+            model.model.embed_tokens = model.model.embed_tokens.cpu()
+            model.model.norm = model.model.norm.cpu()
+        elif "opt" in args.net.lower():
+            model.model.decoder.embed_tokens = model.model.decoder.embed_tokens.cpu()
+            model.model.decoder.embed_positions = model.model.decoder.embed_positions.cpu()
+            if hasattr(model.model.decoder, "project_out") and model.model.decoder.project_out:
+                model.model.decoder.project_out = model.model.decoder.project_out.cpu()
+            if hasattr(model.model.decoder, "project_in") and model.model.decoder.project_in:
+                model.model.decoder.project_in = model.model.decoder.project_in.cpu()
+        else:
+            raise ValueError("Only support for opt/llama/Llama-2 now")
+        torch.cuda.empty_cache()
+
+        attention_mask = cache["attention_mask"]
+        position_ids = cache["position_ids"] if is_llama else None
+
+        torch.save(inps, cache_inps)
+        torch.save(attention_mask, cache_attention_mask)
+        torch.save(position_ids, cache_position_ids)
+            
     
     # same input of first layer for fp model and quant model
     quant_inps = inps # 첫 번째 layer에 넣을 임베딩된 입력
     fp_inps = copy.deepcopy(inps)   # take output of fp model as input
     fp_inps_2 = copy.deepcopy(inps) if args.aug_loss else None # take output of quantization model as input
-    
-
-    attention_mask = cache["attention_mask"]
     attention_mask_batch = attention_mask.repeat(args.batch_size,1,1,1) if args.deactive_amp else attention_mask.repeat(args.batch_size,1,1,1).float()
     # loss_func = torch.nn.MSELoss()
     # SE 구해서 평균 나중에 내기?
     loss_func = SELoss()
     # loss_func = torch.nn.L1Loss()
-    if is_llama:
-        position_ids = cache["position_ids"]
-    else:
-        position_ids = None
     cossim = nn.CosineSimilarity(dim=2)
 
     if args.resume:
@@ -163,9 +187,18 @@ def RLQuant(
         if args.epochs > 0:
             with torch.no_grad():
                 with torch.cuda.amp.autocast():
-                    for j in range(args.nsamples):
-                        fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0] # 현재 layer의 output 계산
-                        if args.aug_loss:
+                    cache_inps = f'{args.input_cache_dir}/inps_{i+1}.cache'
+                    if os.path.exists(cache_inps):
+                        del fp_inps
+                        fp_inps = torch.load(cache_inps)
+                        logger.info(f"load inps_{i+1} from {cache_inps}")
+                    else:
+                        for j in range(args.nsamples):
+                            fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0] # 현재 layer의 output 계산
+                        torch.save(fp_inps, cache_inps)
+        
+                    if args.aug_loss:
+                        for j in range(args.nsamples):
                             fp_inps_2[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0]
 
         # init smooth parameters
