@@ -12,6 +12,7 @@ import os
 import pdb
 import gc
 
+from models.LMClass import LMClass
 
 
 def get_named_linears(module):
@@ -19,7 +20,7 @@ def get_named_linears(module):
 
 
 def RLQuant(
-    lm,
+    lm: LMClass,
     args,
     dataloader,
     act_scales,
