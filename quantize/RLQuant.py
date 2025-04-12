@@ -278,9 +278,8 @@ def RLQuant(
                                 model.lm_head = typing.cast(nn.Linear, model.lm_head)
                                 model.lm_head.to(dev)
                                 
-                                print("model.lm_head.weight", model.lm_head.weight)
-                                if prev_lm_head_params is not None:
-                                    print("model.lm_head.weight same:", torch.equal(prev_lm_head_params, model.lm_head.weight))
+                                if prev_lm_head_params is not None and not torch.equal(prev_lm_head_params, model.lm_head.weight):
+                                    logger.info("model.lm_head.weight is changed", prev_lm_head_params, model.lm_head.weight)
                                 prev_lm_head_params = model.lm_head.weight.detach().clone()
                                 
                                 if args.no_grad:
