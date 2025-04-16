@@ -268,6 +268,47 @@ def RLQuant(
 
                             # abs 대신 cossim 값을 0~1로 매핑함
                             cos: torch.Tensor = cossim(fp_inps[index:index+args.batch_size,], quant_out)/2 + 0.5
+
+                            if args.softmax_weighted is not None and i == len(layers)-1:
+                                model.lm_head = typing.cast(nn.Linear, model.lm_head)
+                                model.lm_head.to(dev)
+                                
+                                if prev_lm_head_params is not None and not torch.equal(prev_lm_head_params, model.lm_head.weight):
+                                    logger.info("model.lm_head.weight is changed", prev_lm_head_params, model.lm_head.weight)
+                                prev_lm_head_params = model.lm_head.weight.detach().clone()
+                                
+                                lm_head_out = model.lm_head(quant_out)
+                                
+                                softmax_pred = torch.softmax(lm_head_out, 2) # [1, 2048, 32000]
+                                softmax_pred_max = torch.max(softmax_pred, 2).values # [1, 2048]
+                                # softmax_pred_max는 입력 차원(2048)의 각 토큰별로 가장 높은 예측
+                                print(f"layer {i} iter {epochs} batch index {index} prediction weight:{softmax_pred_max}")
+
+                                # # TODO: 가중평균?
+                                # if args.softmax_weighted == "each-wmean":
+                                #     loss_weight = torch.tensor([softmax_pred_max, 1 - softmax_pred_max])
+                                #     (x*loss_weight).sum() / loss_weight.sum()
+                                #     loss = weighted_mean([softmax_pred_max, 1 - softmax_pred_max], [cos, mse_loss])
+                                if args.softmax_weighted == "nlc":
+                                    cos *= softmax_pred_max
+                                elif args.softmax_weighted == "mse":
+                                    mse_loss *= softmax_pred_max
+                                elif args.softmax_weighted == "both":
+                                    cos *= softmax_pred_max
+                                    mse_loss *= softmax_pred_max
+                                elif args.softmax_weighted == "each":
+                                    cos *= softmax_pred_max
+                                    mse_loss *= 1 - softmax_pred_max
+                                elif args.softmax_weighted == "each_reverse":
+                                    # nlc loss의 비율을 반대로 조정?
+                                    # softmax_pred_max가 1인 경우가 존재
+                                    # cos *= 1 - softmax_pred_max결과 cos가 0이 되고, -log(0)해서 inf가 됨
+                                    cos *= 1 - softmax_pred_max
+                                    mse_loss *= softmax_pred_max
+                                else:
+                                    # treated as None
+                                    pass
+
                             nlc_loss = -torch.log(cos)
                             # 평균내고 계산하는거랑 계산하고 평균내는거랑 역전파가 다르게 되나?
                             loss = (mse_loss + nlc_loss).mean()

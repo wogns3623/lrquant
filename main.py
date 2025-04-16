@@ -288,6 +288,8 @@ def main():
     parser.add_argument("--use_saved", default=False, action="store_true", help="use saved model")
     parser.add_argument("--use_saved_layer", type=int, default=0, help="use saved layer quantization parameters until given number layer reached. using with resume")
     parser.add_argument("--loss_scale", type=float, default=1)
+    parser.add_argument("--softmax_weighted", type=str, default=None, choices=["nlc", "mse", "each", "both", "each_reverse"])
+    # parser.add_argument("--wmse", default=False, action="store_true", help="use weighted mse")
     parser.add_argument("--original_loss", default=False, action="store_true")
 
     args = parser.parse_args()
