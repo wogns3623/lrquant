@@ -16,6 +16,7 @@ from tqdm import tqdm
 import utils
 from pathlib import Path
 from categories import subcategories, categories
+import argparse
 
 from models.int_llama_layer import QuantLlamaDecoderLayer
 from models.int_opt_layer import QuantOPTDecoderLayer
@@ -100,7 +101,7 @@ def evaluate(lm, args, logger, fp_lm):
 
     if args.eval_ppl:
         for dataset in ["wikitext2","ptb","c4","ptb-new",'c4-new']:
-            cache_testloader = f'{args.cache_dir}/testloader_{args.model_family}_{dataset}_all.cache'                   
+            cache_testloader = f'{args.cache_dir}/testloader_{dataset}_all.cache'                   
 
             if os.path.exists(cache_testloader):
                 testloader = torch.load(cache_testloader)
@@ -231,12 +232,21 @@ def evaluate(lm, args, logger, fp_lm):
     return results
 
 
+def seed_str(arg):
+    try:
+        return int(arg)  # try convert to int
+    except ValueError:
+        pass
+    if arg == "random":
+        return arg
+    raise argparse.ArgumentTypeError("seed must be an int or 'random'")
+
 def main():
-    import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, help="model name of model path")
     parser.add_argument("--cache_dir", default="./cache", type=str, help="cache dir of dataset, leading to faster debug")
+    parser.add_argument("--input_cache_dir", default=None, type=str, help="cache dir of input from dataset, leading to faster debug")
     parser.add_argument("--output_dir", default="../log/", type=str, help="direction of logging file")
     parser.add_argument("--save_dir", default=None, type=str, help="direction for saving fake quantization model")
     parser.add_argument("--resume", type=str, default=None)
@@ -247,7 +257,7 @@ def main():
     )
     parser.add_argument("--nsamples", type=int, default=128, help="Number of calibration data samples.")
     parser.add_argument("--batch_size", type=int, default=1, help="batch size.")
-    parser.add_argument("--seed", type=int, default=2, help="Seed for sampling the calibration data.")
+    parser.add_argument("--seed", type=seed_str, default=2, help="Seed for sampling the calibration data. Set to 'random' to use a random seed.")
     parser.add_argument("--tasks", default="")
     parser.add_argument("--eval_ppl", action="store_true")
     parser.add_argument("--num_fewshot", type=int, default=0)
@@ -273,13 +283,19 @@ def main():
     parser.add_argument("--act-scales", type=str, default=None)
     parser.add_argument("--act-shifts", type=str, default=None)
     parser.add_argument("--tta-shifts", type=str, default=None)
+    parser.add_argument("--debug", default=False, action="store_true")
+    parser.add_argument("--disable_cache", default=False, action="store_true")
     parser.add_argument("--use_saved", default=False, action="store_true", help="use saved model")
     parser.add_argument("--use_saved_layer", type=int, default=0, help="use saved layer quantization parameters until given number layer reached. using with resume")
     parser.add_argument("--loss_scale", type=float, default=1)
-    parser.add_argument("--softmax_weighted", type=str, default=None, choices=["each", "each_reverse", "loss"])
-    parser.add_argument("--wmse", default=False, action="store_true", help="use weighted mse")
+    parser.add_argument("--softmax_weighted", type=str, default=None, choices=["nlc", "mse", "each", "both", "each_reverse"])
+    # parser.add_argument("--wmse", default=False, action="store_true", help="use weighted mse")
+    parser.add_argument("--original_loss", default=False, action="store_true")
 
     args = parser.parse_args()
+    if args.seed == "random":
+        args.seed = random.randint(0, 2**32 - 1)
+        
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -295,13 +311,10 @@ def main():
     # init logger
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    if args.cache_dir:
-        Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
-    if args.save_dir:
-        Path(args.save_dir).mkdir(parents=True, exist_ok=True)
     output_dir = Path(args.output_dir)
     logger = utils.create_logger(output_dir)
     logger.info(args)
+    logger.info(f"seed: {args.seed}")
     
     # load model
     if args.net is None:
@@ -310,6 +323,17 @@ def main():
     args.model_family = args.net.split('-')[0]
     lm = LMClass(args)
     lm.seqlen = 2048
+
+    if args.cache_dir:
+        args.cache_dir = os.path.join(args.cache_dir, args.model_family)
+        Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
+
+        if args.input_cache_dir is None:
+            args.input_cache_dir = os.path.join(args.cache_dir, f'{args.calib_dataset}_{args.nsamples}')
+        Path(args.input_cache_dir).mkdir(parents=True, exist_ok=True)
+    
+    if args.save_dir:
+        Path(args.save_dir).mkdir(parents=True, exist_ok=True)
     
     lm.model.eval()
     for param in lm.model.parameters():
@@ -379,8 +403,8 @@ def main():
         logger.info("=== start quantization ===")
         tick = time.time()     
         # load calibration dataset
-        cache_dataloader = f'{args.cache_dir}/dataloader_{args.model_family}_{args.calib_dataset}_{args.nsamples}.cache'
-        if os.path.exists(cache_dataloader):
+        cache_dataloader = f'{args.input_cache_dir}/dataloader.cache'
+        if not args.disable_cache and os.path.exists(cache_dataloader):
             dataloader = torch.load(cache_dataloader)
             logger.info(f"load calibration from {cache_dataloader}")
         else:
@@ -391,7 +415,8 @@ def main():
                 model=args.model,
                 seqlen=lm.seqlen,
             )
-            torch.save(dataloader, cache_dataloader)    
+            if not args.disable_cache:
+                torch.save(dataloader, cache_dataloader)    
 
         act_scales = None
         act_shifts = None
@@ -433,6 +458,14 @@ def main():
     evaluate(lm, args, logger, fp_lm)
 
 
+from cProfile import Profile
+
 if __name__ == "__main__":
     print(sys.argv)
-    main()
+    if sys.argv.__contains__('--profile'):
+        sys.argv.remove('--profile')
+        profiler = Profile()
+        profiler.runcall(main)
+        profiler.dump_stats('profile.prof')
+    else:
+        main()
