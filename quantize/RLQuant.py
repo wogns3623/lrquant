@@ -268,7 +268,6 @@ def RLQuant(
 
                             # abs 대신 cossim 값을 0~1로 매핑함
                             cos: torch.Tensor = cossim(fp_inps[index:index+args.batch_size,], quant_out)/2 + 0.5
-                            cos.sort(dim=1)
 
                             if args.softmax_weighted is not None and i == len(layers)-1:
                                 model.lm_head = typing.cast(nn.Linear, model.lm_head)
