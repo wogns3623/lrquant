@@ -11,6 +11,7 @@ import utils
 import os
 import pdb
 import gc
+import typing
 
 from models.LMClass import LMClass
 
@@ -69,21 +70,22 @@ def RLQuant(
     attention_mask: torch.Tensor = None
     position_ids: torch.Tensor | None = None
     
-    cache_inps = f'{args.input_cache_dir}/inps_0.cache'
-    if os.path.exists(cache_inps):
-        # inps = torch.load(cache_inps, map_location=dev)
-        inps = torch.load(cache_inps)
-        logger.info(f"load inps_0 from {cache_inps}")
-    
-    cache_attention_mask = f'{args.input_cache_dir}/attention_mask.cache'
-    if os.path.exists(cache_attention_mask):
-        attention_mask = torch.load(cache_attention_mask)
-        logger.info(f"load attention_mask from {cache_attention_mask}")
+    if not args.disable_cache:
+        cache_inps = f'{args.input_cache_dir}/inps_0.cache'
+        if os.path.exists(cache_inps):
+            # inps = torch.load(cache_inps, map_location=dev)
+            inps = torch.load(cache_inps)
+            logger.info(f"load inps_0 from {cache_inps}")
         
-    cache_position_ids = f'{args.input_cache_dir}/position_ids.cache'
-    if is_llama and os.path.exists(cache_position_ids):
-            position_ids = torch.load(cache_position_ids)
-            logger.info(f"load position_ids from {cache_position_ids}")
+        cache_attention_mask = f'{args.input_cache_dir}/attention_mask.cache'
+        if os.path.exists(cache_attention_mask):
+            attention_mask = torch.load(cache_attention_mask)
+            logger.info(f"load attention_mask from {cache_attention_mask}")
+            
+        cache_position_ids = f'{args.input_cache_dir}/position_ids.cache'
+        if is_llama and os.path.exists(cache_position_ids):
+                position_ids = torch.load(cache_position_ids)
+                logger.info(f"load position_ids from {cache_position_ids}")
     
     if inps is None or attention_mask is None or (is_llama and position_ids is None):
         inps = torch.zeros(
@@ -150,9 +152,10 @@ def RLQuant(
         attention_mask = cache["attention_mask"]
         position_ids = cache["position_ids"] if is_llama else None
 
-        torch.save(inps, cache_inps)
-        torch.save(attention_mask, cache_attention_mask)
-        torch.save(position_ids, cache_position_ids)
+        if not args.disable_cache:
+            torch.save(inps, cache_inps)
+            torch.save(attention_mask, cache_attention_mask)
+            torch.save(position_ids, cache_position_ids)
             
     
     # same input of first layer for fp model and quant model
@@ -183,14 +186,15 @@ def RLQuant(
             with torch.no_grad():
                 with torch.cuda.amp.autocast():
                     cache_inps = f'{args.input_cache_dir}/inps_{i+1}.cache'
-                    if os.path.exists(cache_inps):
+                    if not args.disable_cache and os.path.exists(cache_inps):
                         del fp_inps
                         fp_inps = torch.load(cache_inps)
                         logger.info(f"load inps_{i+1} from {cache_inps}")
                     else:
                         for j in range(args.nsamples):
                             fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0] # 현재 layer의 output 계산
-                        torch.save(fp_inps, cache_inps)
+                        if not args.disable_cache:
+                            torch.save(fp_inps, cache_inps)
         
                     if args.aug_loss:
                         for j in range(args.nsamples):
@@ -238,6 +242,8 @@ def RLQuant(
             loss_scaler = utils.NativeScalerWithGradNormCount()
                    
             for epochs in range(args.epochs):
+                prev_lm_head_params = None
+                
                 loss_list = []
                 norm_list = []
                 for j in range(args.nsamples//args.batch_size):    
@@ -246,16 +252,30 @@ def RLQuant(
                     with traincast(): # 정밀도를 자동으로 맞춰줌
                         qlayer.smooth_and_quant_temporary()
                         quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0] # 양자화된 layer output
-                        loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out) # line 163에서 계산된 full-precision output과 quantized output을 비교, LMSE
-                        # loss2 = loss_func(ones_ops[index:index+args.batch_size,], quant_out_ones)
                         
-                        # OmniQuant와 다른 부분
-                        # cosine similarity도 계산, LNLC == -log(cos)
-                        cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs()
-                        loss -= torch.log(cos) # LMSE + LNLC
-                        
+                        if args.original_loss:
+                             # line 163에서 계산된 full-precision output과 quantized output을 비교, LMSE
+                            loss = loss_func(fp_inps[index:index+args.batch_size,], quant_out)
+                            # loss2 = loss_func(ones_ops[index:index+args.batch_size,], quant_out_ones)
+                            
+                            # OmniQuant와 다른 부분
+                            # cosine similarity도 계산, LNLC == -log(cos)
+                            cos = cossim(quant_out,fp_inps[index:index+args.batch_size,]).mean().abs()
+                            loss -= torch.log(cos) # LMSE + LNLC
+                        else:
+                            square_error = torch.square(fp_inps[index:index+args.batch_size,] - quant_out) # [1, 2048, 4096]
+                            mse_loss = square_error.mean(2) # [1, 2048]
+
+                            # abs 대신 cossim 값을 0~1로 매핑함
+                            cos: torch.Tensor = cossim(fp_inps[index:index+args.batch_size,], quant_out)/2 + 0.5
+                            nlc_loss = -torch.log(cos)
+                            # 평균내고 계산하는거랑 계산하고 평균내는거랑 역전파가 다르게 되나?
+                            loss = (mse_loss + nlc_loss).mean()
+
                         if args.aug_loss:
                             loss += loss_func(fp_inps_2[index:index+args.batch_size,], quant_out)
+
+                        loss *= args.loss_scale
                     if not math.isfinite(loss.item()):
                         logger.info("Loss is NAN, stopping training")
                         # quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0]

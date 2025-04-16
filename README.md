@@ -26,16 +26,20 @@ huggingface-cli download meta-llama/Llama-2-7b-hf --local-dir ./huggingface/llam
 # run
 python generate_act_scale_shift.py --model ./huggingface/llama-2-7b-hf
 
-CUDA_VISIBLE_DEVICES=0,1 python main.py \
---model ./huggingface/llama-2-7b-hf  \
---epochs 20 --output_dir ./log/llama-2-7b-hf-w4a4-base --save_dir ./output/llama-2-7b-hf-w4a4-base  \
---eval_ppl --wbits 4 --abits 4 --lwc --let --multigpu
+python main.py --model ./huggingface/llama-2-7b-hf \
+--epochs 20 --nsamples 128 --output_dir ./log/test \
+--wbits 4 --abits 4 --lwc --let --multigpu --let_lr 25e-5 --lwc_lr 25e-4 \
 
-CUDA_VISIBLE_DEVICES=0,1 python main.py \
---model ./huggingface/llama-2-7b-hf \
---epochs 20 --output_dir ./log/llama-2-7b-hf-w4a4-base \
+python main.py --model ./huggingface/llama-2-7b-hf \
+--resume ./log/test/rlq_parameters.pth --use_saved_layer 32 \
+--output_dir ./log/test \
 --wbits 4 --abits 4 --lwc --let --multigpu \
---use_saved \
+--eval_ppl
+
+python main.py --model ./huggingface/llama-2-7b-hf \
+--resume ./log/test/rlq_parameters.pth --use_saved_layer 32 \
+--output_dir ./log/test \
+--wbits 4 --abits 4 --lwc --let --multigpu \
 --tasks piqa,arc_easy,arc_challenge,boolq,hellaswag,winogrande
 ```
 

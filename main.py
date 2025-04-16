@@ -16,6 +16,7 @@ from tqdm import tqdm
 import utils
 from pathlib import Path
 from categories import subcategories, categories
+import argparse
 
 from models.int_llama_layer import QuantLlamaDecoderLayer
 from models.int_opt_layer import QuantOPTDecoderLayer
@@ -231,8 +232,16 @@ def evaluate(lm, args, logger, fp_lm):
     return results
 
 
+def seed_str(arg):
+    try:
+        return int(arg)  # try convert to int
+    except ValueError:
+        pass
+    if arg == "random":
+        return arg
+    raise argparse.ArgumentTypeError("seed must be an int or 'random'")
+
 def main():
-    import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, help="model name of model path")
@@ -248,7 +257,7 @@ def main():
     )
     parser.add_argument("--nsamples", type=int, default=128, help="Number of calibration data samples.")
     parser.add_argument("--batch_size", type=int, default=1, help="batch size.")
-    parser.add_argument("--seed", type=int, default=2, help="Seed for sampling the calibration data.")
+    parser.add_argument("--seed", type=seed_str, default=2, help="Seed for sampling the calibration data. Set to 'random' to use a random seed.")
     parser.add_argument("--tasks", default="")
     parser.add_argument("--eval_ppl", action="store_true")
     parser.add_argument("--num_fewshot", type=int, default=0)
@@ -274,10 +283,17 @@ def main():
     parser.add_argument("--act-scales", type=str, default=None)
     parser.add_argument("--act-shifts", type=str, default=None)
     parser.add_argument("--tta-shifts", type=str, default=None)
+    parser.add_argument("--debug", default=False, action="store_true")
+    parser.add_argument("--disable_cache", default=False, action="store_true")
     parser.add_argument("--use_saved", default=False, action="store_true", help="use saved model")
     parser.add_argument("--use_saved_layer", type=int, default=0, help="use saved layer quantization parameters until given number layer reached. using with resume")
+    parser.add_argument("--loss_scale", type=float, default=1)
+    parser.add_argument("--original_loss", default=False, action="store_true")
 
     args = parser.parse_args()
+    if args.seed == "random":
+        args.seed = random.randint(0, 2**32 - 1)
+        
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -296,6 +312,7 @@ def main():
     output_dir = Path(args.output_dir)
     logger = utils.create_logger(output_dir)
     logger.info(args)
+    logger.info(f"seed: {args.seed}")
     
     # load model
     if args.net is None:
@@ -385,7 +402,7 @@ def main():
         tick = time.time()     
         # load calibration dataset
         cache_dataloader = f'{args.input_cache_dir}/dataloader.cache'
-        if os.path.exists(cache_dataloader):
+        if not args.disable_cache and os.path.exists(cache_dataloader):
             dataloader = torch.load(cache_dataloader)
             logger.info(f"load calibration from {cache_dataloader}")
         else:
@@ -396,7 +413,8 @@ def main():
                 model=args.model,
                 seqlen=lm.seqlen,
             )
-            torch.save(dataloader, cache_dataloader)    
+            if not args.disable_cache:
+                torch.save(dataloader, cache_dataloader)    
 
         act_scales = None
         act_shifts = None
