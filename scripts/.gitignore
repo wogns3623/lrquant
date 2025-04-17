@@ -1,2 +1,4 @@
 run*.sh
 *.ipynb
+
+fig/
