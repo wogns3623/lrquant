@@ -172,7 +172,7 @@ def RLQuant(
     else:
         rlq_parameters = {}
     
-    for i in range(len(layers)):
+    for i in range(len(layers)-args.preserve_last_layers):
         logger.info(f"=== Start quantize layer {i} ===")
         
         layer = layers[i].to(dev)
@@ -267,7 +267,7 @@ def RLQuant(
                             mse_loss = square_error.mean(2) # [1, 2048]
 
                             # abs 대신 cossim 값을 0~1로 매핑함
-                            cos: torch.Tensor = cossim(fp_inps[index:index+args.batch_size,], quant_out)/2 + 0.5
+                            cos: torch.Tensor = cossim(fp_inps[index:index+args.batch_size,], quant_out)/2 + 0.5 # [1, 2048]
                             nlc_loss = -torch.log(cos)
                             # 평균내고 계산하는거랑 계산하고 평균내는거랑 역전파가 다르게 되나?
                             loss = (mse_loss + nlc_loss).mean()
@@ -322,7 +322,7 @@ def RLQuant(
                 scales = scales.view(dim0,-1)
                 zeros = zeros.view(dim0,-1)
                 q_linear = qlinear_cuda.QuantLinear(args.wbits, group_size, module.in_features,module.out_features,not module.bias is None)
-                q_linear.pack(module.float().cpu(),  scales.float().cpu(), zeros.float().cpu())
+                q_linear.pack(module.float().cpu(), scales.float().cpu(), zeros.float().cpu())
                 
                 levels = name.split('.')
                 if len(levels) > 1:

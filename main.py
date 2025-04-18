@@ -289,6 +289,7 @@ def main():
     parser.add_argument("--use_saved_layer", type=int, default=0, help="use saved layer quantization parameters until given number layer reached. using with resume")
     parser.add_argument("--loss_scale", type=float, default=1)
     parser.add_argument("--original_loss", default=False, action="store_true")
+    parser.add_argument("--preserve_last_layers", type=int, default=0)
 
     args = parser.parse_args()
     if args.seed == "random":
@@ -433,6 +434,7 @@ def main():
         logger.info(time.time() - tick)
         # lm.model.eval()
         # torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
+        print(lm.model)
         
         if args.save_dir:
             # delete rlq parameters
