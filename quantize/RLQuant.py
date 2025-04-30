@@ -70,19 +70,19 @@ def RLQuant(
     attention_mask: torch.Tensor = None
     position_ids: torch.Tensor | None = None
     
-    if not args.disable_cache:
-        cache_inps = f'{args.input_cache_dir}/inps_0.cache'
+    if args.cache_input:
+        cache_inps = f'{args.model_cache_dir}/inps_0.cache'
         if os.path.exists(cache_inps):
             # inps = torch.load(cache_inps, map_location=dev)
             inps = torch.load(cache_inps)
             logger.info(f"load inps_0 from {cache_inps}")
         
-        cache_attention_mask = f'{args.input_cache_dir}/attention_mask.cache'
+        cache_attention_mask = f'{args.model_cache_dir}/attention_mask.cache'
         if os.path.exists(cache_attention_mask):
             attention_mask = torch.load(cache_attention_mask)
             logger.info(f"load attention_mask from {cache_attention_mask}")
             
-        cache_position_ids = f'{args.input_cache_dir}/position_ids.cache'
+        cache_position_ids = f'{args.model_cache_dir}/position_ids.cache'
         if is_llama and os.path.exists(cache_position_ids):
                 position_ids = torch.load(cache_position_ids)
                 logger.info(f"load position_ids from {cache_position_ids}")
@@ -152,7 +152,7 @@ def RLQuant(
         attention_mask = cache["attention_mask"]
         position_ids = cache["position_ids"] if is_llama else None
 
-        if not args.disable_cache:
+        if args.cache_input:
             torch.save(inps, cache_inps)
             torch.save(attention_mask, cache_attention_mask)
             torch.save(position_ids, cache_position_ids)
@@ -185,15 +185,15 @@ def RLQuant(
         if args.epochs > 0:
             with torch.no_grad():
                 with torch.cuda.amp.autocast():
-                    cache_inps = f'{args.input_cache_dir}/inps_{i+1}.cache'
-                    if not args.disable_cache and os.path.exists(cache_inps):
+                    cache_inps = f'{args.model_cache_dir}/inps_{i+1}.cache'
+                    if args.cache_input and os.path.exists(cache_inps):
                         del fp_inps
                         fp_inps = torch.load(cache_inps)
                         logger.info(f"load inps_{i+1} from {cache_inps}")
                     else:
                         for j in range(args.nsamples):
                             fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0] # 현재 layer의 output 계산
-                        if not args.disable_cache:
+                        if args.cache_input:
                             torch.save(fp_inps, cache_inps)
         
                     if args.aug_loss:

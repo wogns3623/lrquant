@@ -1,5 +1,6 @@
 import torch
 import os
+from pathlib import Path
 
 from transformers import (
     AutoModelForCausalLM,
@@ -107,10 +108,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str,
                         default='/cpfs01/user/chenmengzhao/llama_quantization/llama-hf/llama-7b', help='model name')
-    parser.add_argument('--scales-output-path', type=str, default='./act_scales/',
-                        help='where to save the act scales')
-    parser.add_argument('--shifts-output-path', type=str, default='./act_shifts/',
-                        help='where to save the act shifts')
+    parser.add_argument("--cache_dir", default="./cache", type=str, help="cache dir of dataset, leading to faster debug")
     parser.add_argument("--calib_dataset",type=str,default="wikitext2",
         choices=["wikitext2", "ptb", "c4", "mix","pile"],
         help="Where to extract calibration data from.",)
@@ -125,24 +123,26 @@ def parse_args():
 def main():
     args = parse_args()
     model, tokenizer = build_model_and_tokenizer(args.model)
-    dataloader, _ = get_loaders(
-    args.calib_dataset,
-    nsamples=args.num_samples,
-    seed=args.seed,
-    model=args.model,
-    seqlen=args.seq_len,
-    )
     
     args.net = args.model.split('/')[-1]
+    args.dataset_cache_dir = os.path.join(args.cache_dir, f'{args.calib_dataset}_{args.num_samples}_{args.seed}')
+    args.model_cache_dir = os.path.join(args.dataset_cache_dir, args.net)
+    Path(args.model_cache_dir).mkdir(parents=True, exist_ok=True)
+    
+    dataloader, _ = get_loaders(
+        args.calib_dataset,
+        nsamples=args.num_samples,
+        seed=args.seed,
+        model=args.model,
+        seqlen=args.seq_len,
+        cache_dir=f'{args.dataset_cache_dir}/dataloader.cache',
+    )
+    
     act_scales = get_act_scales(model, dataloader,args.num_samples)
-    save_path = os.path.join(args.scales_output_path,f'{args.net}.pt')
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    torch.save(act_scales, save_path)
+    torch.save(act_scales, f"{args.model_cache_dir}/act_scales.pt")
 
     act_shifts = get_act_shifts(model, dataloader,args.num_samples)
-    save_path = os.path.join(args.shifts_output_path,f'{args.net}.pt')
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    torch.save(act_shifts, save_path)
+    torch.save(act_shifts, f"{args.model_cache_dir}/act_shifts.pt")
 
 
 if __name__ == '__main__':
