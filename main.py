@@ -59,7 +59,7 @@ net_choices = [
 
 
 @torch.no_grad()
-def evaluate(lm, args, logger, fp_lm):
+def evaluate(lm: LMClass, args, logger, fp_lm):
     results = {}
     if args.multigpu:
         if "opt" in args.net.lower():
@@ -280,6 +280,7 @@ def main():
     parser.add_argument("--cache_dataloader", default=True, action="store_true")
     parser.add_argument("--cache_input", default=False, action="store_true")
     parser.add_argument("--use_saved", default=False, action="store_true", help="use saved model")
+    parser.add_argument("--use_saved", default=None, type=str, help="use saved model")
     parser.add_argument("--use_saved_layer", type=int, default=0, help="use saved layer quantization parameters until given number layer reached. using with resume")
     parser.add_argument("--loss_scale", type=float, default=1)
     parser.add_argument("--original_loss", default=False, action="store_true")
@@ -333,8 +334,8 @@ def main():
     for fp_param in fp_lm.model.parameters():
         fp_param.requires_grad = False
 
-    if args.use_saved:
-        # lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")), strict=False)
+    if args.use_saved is not None:
+        lm.model.load_state_dict(torch.load(os.path.join(args.use_saved, f"current.pth")), strict=False)
         lm.model.eval() # evaluation mode
         evaluate(lm, args, logger, fp_lm)
         return
@@ -417,7 +418,6 @@ def main():
         )
         logger.info(time.time() - tick)
         # lm.model.eval()
-        # torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
         
         if args.save_dir:
             # delete rlq parameters
@@ -436,6 +436,7 @@ def main():
 
             lm.model.save_pretrained(args.save_dir)  
             lm.tokenizer.save_pretrained(args.save_dir)
+            torch.save(lm.model.state_dict(),os.path.join(args.save_dir, f"current.pth"))
 
     lm.model.eval() # evaluation mode
     evaluate(lm, args, logger, fp_lm)

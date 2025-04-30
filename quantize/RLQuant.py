@@ -242,8 +242,6 @@ def RLQuant(
             loss_scaler = utils.NativeScalerWithGradNormCount()
                    
             for epochs in range(args.epochs):
-                prev_lm_head_params = None
-                
                 loss_list = []
                 norm_list = []
                 for j in range(args.nsamples//args.batch_size):    
