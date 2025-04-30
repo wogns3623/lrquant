@@ -277,14 +277,12 @@ def main():
     parser.add_argument("--act_shifts", type=str, default=None)
     parser.add_argument("--tta_shifts", type=str, default=None)
     parser.add_argument("--debug", default=False, action="store_true")
-    parser.add_argument("--cache_dataloader", default=True, action="store_true")
+    parser.add_argument("--cache_dataloader", default=True, type=bool)
     parser.add_argument("--cache_input", default=False, action="store_true")
-    parser.add_argument("--use_saved", default=False, action="store_true", help="use saved model")
     parser.add_argument("--use_saved", default=None, type=str, help="use saved model")
     parser.add_argument("--use_saved_layer", type=int, default=0, help="use saved layer quantization parameters until given number layer reached. using with resume")
     parser.add_argument("--loss_scale", type=float, default=1)
     parser.add_argument("--original_loss", default=False, action="store_true")
-    parser.add_argument("--softmax_weighted", type=str, default=None, choices=["nlc", "mse", "each", "both"])
 
     args = parser.parse_args()
     if args.seed == "random":
