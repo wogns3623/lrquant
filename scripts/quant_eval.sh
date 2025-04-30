@@ -1,5 +1,8 @@
 #!/bin/bash
 
+DIRPATH=$(dirname $(realpath $0))
+cd $DIRPATH/..
+
 # No default values, these must be provided
 MODEL=""
 OUTPUT_DIR=""

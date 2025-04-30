@@ -121,8 +121,7 @@ def get_task_model_dict(results):
     return task_model_dict
 
 
-def plot_task_results(results, diff_base=None):
-    task_model_dict = get_task_model_dict(results)
+def plot_task_results(task_model_dict, diff_base=None, padding_left=0.1, padding_right=0.1):
     fig = plt.figure(constrained_layout=True, figsize=(20, 10))
 
     for idx, (task, model_result) in enumerate(task_model_dict.items()):
@@ -143,12 +142,38 @@ def plot_task_results(results, diff_base=None):
         else:
             values_diff = values * 100
 
-        ax.set_xlim(xmin=(min(values_diff) * 9 / 10), xmax=(max(values_diff) * 11 / 10))
+        ax.set_xlim(xmin=(min(values_diff) * (1-padding_left)), xmax=(max(values_diff) * (1+padding_right)))
         barh = ax.barh(names, values_diff, align="center", alpha=0.5)
         ax.bar_label(barh, label_type="center")
+        ax.plot(values_diff, names)
 
     plt.show()
 
+
+def plot_task_results_violin(task_model_dict, diff_base=None):
+    fig = plt.figure(constrained_layout=True, figsize=(20, 10))
+
+    for idx, (task, model_result) in enumerate(task_model_dict.items()):
+        ax = fig.add_subplot(2, len(task_model_dict) // 2, (idx + 1))
+        ax.set_title(task)
+
+        if diff_base is None:
+            base_result = next(
+                (value for name, value in model_result if name == diff_base), None
+            )
+
+        # model_result = [("fp16", fp_16_results[task]), *model_result]
+        names, values = zip(*((name, value) for name, value in model_result))
+        values = np.array(values)
+
+        if base_result is not None:
+            values_diff = (values - base_result) * 100
+        else:
+            values_diff = values * 100
+
+        ax.violinplot(values_diff, showmeans=False, showmedians=True)
+
+    plt.show()
 
 def get_ppl_model_dict(results):
     ppl_model_dict = {}
@@ -165,8 +190,7 @@ def get_ppl_model_dict(results):
     return ppl_model_dict
 
 
-def plot_ppl_results(results, diff_base=None):
-    ppl_model_dict = get_ppl_model_dict(results)
+def plot_ppl_results(ppl_model_dict, diff_base=None):
     fig = plt.figure(constrained_layout=True, figsize=(20, 10))
 
     for idx, (ppl_name, model_result) in enumerate(ppl_model_dict.items()):

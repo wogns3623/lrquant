@@ -4,6 +4,7 @@ from datasets import load_dataset
 import numpy as np
 import torch
 import random
+import os
 
 
 def set_seed(seed):
@@ -171,7 +172,7 @@ def get_c4_new(nsamples, seed, seqlen, model):
     return trainloader, valenc
 
 
-def get_loaders(
+def get_loaders_nocache(
     name, nsamples=128, seed=0, seqlen=2048, model='',
 ):
     if 'wikitext2' in name:
@@ -192,4 +193,28 @@ def get_loaders(
         c4_train,c4_val=get_c4(nsamples//3, seed, seqlen, model)
         train=wiki_train+ptb_train+c4_train
         val=None
-        return train,val
+        return train, val
+    
+    raise ValueError(f"Unknown dataset name: {name}")
+
+def get_loaders(
+    name,
+    nsamples=128,
+    seed=0,
+    seqlen=2048,
+    model='',
+    cache_dir=None,
+):
+    train: list[tuple[torch.Tensor,torch.Tensor]] = None
+    val = None
+    if cache_dir is not None and os.path.exists(cache_dir):
+        print(f"Loading train from {cache_dir}")
+        train, val = torch.load(cache_dir)
+        
+    if train is None or val is None:
+        train, val = get_loaders_nocache(name, nsamples, seed, seqlen, model)
+        if cache_dir is not None:
+            print(f"Saving train to {cache_dir}")
+            torch.save((train, val), cache_dir)
+
+    return train, val

@@ -59,7 +59,7 @@ net_choices = [
 
 
 @torch.no_grad()
-def evaluate(lm, args, logger, fp_lm):
+def evaluate(lm: LMClass, args, logger, fp_lm):
     results = {}
     if args.multigpu:
         if "opt" in args.net.lower():
@@ -100,20 +100,14 @@ def evaluate(lm, args, logger, fp_lm):
             lm.model.transformer = lm.model.transformer.to(lm.device)
 
     if args.eval_ppl:
-        for dataset in ["wikitext2","ptb","c4","ptb-new",'c4-new']:
-            cache_testloader = f'{args.cache_dir}/testloader_{dataset}_all.cache'                   
-
-            if os.path.exists(cache_testloader):
-                testloader = torch.load(cache_testloader)
-                logger.info(f"load calibration from {cache_testloader}")
-            else:
-                _, testloader = get_loaders(
-                    dataset,
-                    seed=args.seed,
-                    model=args.model,
-                    seqlen=lm.seqlen,
-                )
-                torch.save(testloader, cache_testloader)
+        for dataset in ["wikitext2","ptb","c4","ptb-new",'c4-new']:                  
+            _, testloader = get_loaders(
+                dataset,
+                seed=args.seed,
+                model=args.model,
+                seqlen=lm.seqlen,
+                cache_dir=f'{args.cache_dir}/testloader_{dataset}_all.cache'
+            )
 
             if "c4" in dataset:
                 testenc = testloader
@@ -246,7 +240,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, help="model name of model path")
     parser.add_argument("--cache_dir", default="./cache", type=str, help="cache dir of dataset, leading to faster debug")
-    parser.add_argument("--input_cache_dir", default=None, type=str, help="cache dir of input from dataset, leading to faster debug")
     parser.add_argument("--output_dir", default="../log/", type=str, help="direction of logging file")
     parser.add_argument("--save_dir", default=None, type=str, help="direction for saving fake quantization model")
     parser.add_argument("--resume", type=str, default=None)
@@ -280,12 +273,13 @@ def main():
     parser.add_argument("--deactive_amp", action="store_true", help="deactivate AMP when 8<=bits<16")
     parser.add_argument("--net", type=str, default=None, choices=net_choices)
     parser.add_argument("--tta", action="store_true", help="test time adaptation") # change here
-    parser.add_argument("--act-scales", type=str, default=None)
-    parser.add_argument("--act-shifts", type=str, default=None)
-    parser.add_argument("--tta-shifts", type=str, default=None)
+    parser.add_argument("--act_scales", type=str, default=None)
+    parser.add_argument("--act_shifts", type=str, default=None)
+    parser.add_argument("--tta_shifts", type=str, default=None)
     parser.add_argument("--debug", default=False, action="store_true")
-    parser.add_argument("--disable_cache", default=False, action="store_true")
-    parser.add_argument("--use_saved", default=False, action="store_true", help="use saved model")
+    parser.add_argument("--cache_dataloader", default=True, type=bool)
+    parser.add_argument("--cache_input", default=False, action="store_true")
+    parser.add_argument("--use_saved", default=None, type=str, help="use saved model")
     parser.add_argument("--use_saved_layer", type=int, default=0, help="use saved layer quantization parameters until given number layer reached. using with resume")
     parser.add_argument("--loss_scale", type=float, default=1)
     parser.add_argument("--softmax_weighted", type=str, default=None, choices=["nlc", "mse", "each", "both", "each_reverse"])
@@ -321,16 +315,12 @@ def main():
         args.net = args.model.split('/')[-1]
     # assert args.net in net_choices
     args.model_family = args.net.split('-')[0]
-    lm = LMClass(args)
+    lm = LMClass(args.model, args.batch_size)
     lm.seqlen = 2048
 
-    if args.cache_dir:
-        args.cache_dir = os.path.join(args.cache_dir, args.model_family)
-        Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
-
-        if args.input_cache_dir is None:
-            args.input_cache_dir = os.path.join(args.cache_dir, f'{args.calib_dataset}_{args.nsamples}')
-        Path(args.input_cache_dir).mkdir(parents=True, exist_ok=True)
+    args.dataset_cache_dir = os.path.join(args.cache_dir, f'{args.calib_dataset}_{args.nsamples}_{args.seed}')
+    args.model_cache_dir = os.path.join(args.dataset_cache_dir, args.net)
+    Path(args.model_cache_dir).mkdir(parents=True, exist_ok=True)
     
     if args.save_dir:
         Path(args.save_dir).mkdir(parents=True, exist_ok=True)
@@ -344,8 +334,8 @@ def main():
     for fp_param in fp_lm.model.parameters():
         fp_param.requires_grad = False
 
-    if args.use_saved:
-        # lm.model.load_state_dict(torch.load(os.path.join(args.output_dir, f"current.pth")), strict=False)
+    if args.use_saved is not None:
+        lm.model.load_state_dict(torch.load(os.path.join(args.use_saved, f"current.pth")), strict=False)
         lm.model.eval() # evaluation mode
         evaluate(lm, args, logger, fp_lm)
         return
@@ -394,29 +384,23 @@ def main():
 
     # act scales and shifts
     if args.act_scales is None:
-        args.act_scales = f'./act_scales/{args.net}.pt'
+        args.act_scales = f'{args.model_cache_dir}/act_scales.pt'
     if args.act_shifts is None:
-        args.act_shifts = f'./act_shifts/{args.net}.pt'
+        args.act_shifts = f'{args.model_cache_dir}/act_shifts.pt'
 
     # quantization
     if args.wbits < 16 or args.abits < 16:
         logger.info("=== start quantization ===")
         tick = time.time()     
         # load calibration dataset
-        cache_dataloader = f'{args.input_cache_dir}/dataloader.cache'
-        if not args.disable_cache and os.path.exists(cache_dataloader):
-            dataloader = torch.load(cache_dataloader)
-            logger.info(f"load calibration from {cache_dataloader}")
-        else:
-            dataloader, _ = get_loaders(
-                args.calib_dataset,
-                nsamples=args.nsamples,
-                seed=args.seed,
-                model=args.model,
-                seqlen=lm.seqlen,
-            )
-            if not args.disable_cache:
-                torch.save(dataloader, cache_dataloader)    
+        dataloader, _ = get_loaders(
+            args.calib_dataset,
+            nsamples=args.nsamples,
+            seed=args.seed,
+            model=args.model,
+            seqlen=lm.seqlen,
+            cache_dir=None if args.cache_dataloader else f'{args.dataset_cache_dir}/dataloader.cache'
+        )   
 
         act_scales = None
         act_shifts = None
@@ -434,7 +418,6 @@ def main():
         )
         logger.info(time.time() - tick)
         # lm.model.eval()
-        # torch.save(lm.model.state_dict(),os.path.join(args.output_dir, f"current.pth"))
         
         if args.save_dir:
             # delete rlq parameters
@@ -453,6 +436,7 @@ def main():
 
             lm.model.save_pretrained(args.save_dir)  
             lm.tokenizer.save_pretrained(args.save_dir)
+            torch.save(lm.model.state_dict(),os.path.join(args.save_dir, f"current.pth"))
 
     lm.model.eval() # evaluation mode
     evaluate(lm, args, logger, fp_lm)
