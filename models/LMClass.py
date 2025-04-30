@@ -10,20 +10,18 @@ from tqdm import tqdm
 import pdb
 
 class LMClass(BaseLM):
-    def __init__(self, args):
-
+    def __init__(self, model_path: str, batch_size: int=1):
         super().__init__()
 
-        self.args = args
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model_name = args.model
-        self.batch_size_per_gpu = args.batch_size
+        self.model_name = model_path
+        self.batch_size_per_gpu = batch_size
 
-        self.model_config = args.model
-        config = AutoConfig.from_pretrained(args.model)
-        self.tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False,legacy=False)
-        # self.model = AutoModelForCausalLM.from_pretrained(args.model, config=config, device_map='cpu',torch_dtype=config.torch_dtype)
-        self.model = typing.cast(LlamaForCausalLM | OPTForCausalLM, AutoModelForCausalLM.from_pretrained(args.model, config=config, device_map='cpu',torch_dtype=torch.float16))
+        config = AutoConfig.from_pretrained(model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False,legacy=False)
+        # self.model = AutoModelForCausalLM.from_pretrained(model, config=config, device_map='cpu',torch_dtype=config.torch_dtype)
+        model =  AutoModelForCausalLM.from_pretrained(model_path, config=config, device_map='cpu',torch_dtype=torch.float16)
+        self.model = typing.cast(LlamaForCausalLM | OPTForCausalLM, model)
         self.seqlen = self.model.config.max_position_embeddings
         self.model.eval()
         self.vocab_size = self.tokenizer.vocab_size

@@ -313,7 +313,7 @@ def main():
         args.net = args.model.split('/')[-1]
     # assert args.net in net_choices
     args.model_family = args.net.split('-')[0]
-    lm = LMClass(args)
+    lm = LMClass(args.model, args.batch_size)
     lm.seqlen = 2048
 
     args.dataset_cache_dir = os.path.join(args.cache_dir, f'{args.calib_dataset}_{args.nsamples}_{args.seed}')

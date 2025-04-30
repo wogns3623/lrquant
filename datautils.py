@@ -193,7 +193,9 @@ def get_loaders_nocache(
         c4_train,c4_val=get_c4(nsamples//3, seed, seqlen, model)
         train=wiki_train+ptb_train+c4_train
         val=None
-        return train,val
+        return train, val
+    
+    raise ValueError(f"Unknown dataset name: {name}")
 
 def get_loaders(
     name,
@@ -203,7 +205,8 @@ def get_loaders(
     model='',
     cache_dir=None,
 ):
-    train, val = None, None
+    train: list[tuple[torch.Tensor,torch.Tensor]] = None
+    val = None
     if cache_dir is not None and os.path.exists(cache_dir):
         print(f"Loading train from {cache_dir}")
         train, val = torch.load(cache_dir)
