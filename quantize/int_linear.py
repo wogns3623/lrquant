@@ -19,6 +19,8 @@ class QuantLinear(nn.Module):
         weight_quant_params: dict = {},
         act_quant_params: dict = {},
         disable_input_quant=False,
+        *,
+        non_uniform_quant: bool = False,
     ):
         super().__init__()
         self.fwd_kwargs = dict()
@@ -36,7 +38,8 @@ class QuantLinear(nn.Module):
         # initialize quantizer
         self.weight_quantizer = UniformAffineQuantizer(**weight_quant_params,shape=org_module.weight.shape)
         if not disable_input_quant:
-            self.act_quantizer = NonUniformQuantizer(**act_quant_params)
+            Quantizer = NonUniformQuantizer if non_uniform_quant else UniformAffineQuantizer
+            self.act_quantizer = Quantizer(**act_quant_params)
         else:
             self.act_quantizer = None
 

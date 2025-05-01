@@ -47,19 +47,25 @@ class QuantOPTAttention(nn.Module):
             org_module.k_proj,
             args.weight_quant_params,
             args.act_quant_params,
+            non_uniform_quant=args.non_uniform,
         )
         self.v_proj = QuantLinear(
             org_module.v_proj,
             args.weight_quant_params,
             args.act_quant_params,
+            non_uniform_quant=args.non_uniform,
         )
         self.q_proj = QuantLinear(
             org_module.q_proj,
             args.weight_quant_params,
             args.act_quant_params,
+            non_uniform_quant=args.non_uniform,
         )
         self.out_proj = QuantLinear(
-            org_module.out_proj, args.weight_quant_params, args.act_quant_params
+            org_module.out_proj,
+            args.weight_quant_params,
+            args.act_quant_params,
+            non_uniform_quant=args.non_uniform,
         )
         self.qkt_matmul = QuantMatMul(
             args.q_quant_params, args.k_quant_params, matmul_func=torch.bmm
@@ -254,11 +260,13 @@ class QuantOPTDecoderLayer(nn.Module):
             ori_layer.fc1,
             weight_quant_params=args.weight_quant_params,
             act_quant_params=args.act_quant_params,
+            non_uniform_quant=args.non_uniform,
         )
         self.fc2 = QuantLinear(
             ori_layer.fc2,
             weight_quant_params=args.weight_quant_params,
             act_quant_params=args.act_quant_params,
+            non_uniform_quant=args.non_uniform,
         )
         self.final_layer_norm = RLQLayerNorm(
             ori_layer.final_layer_norm

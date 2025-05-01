@@ -32,13 +32,16 @@ class QuantLlamaMLP(nn.Module):
         # self.up_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
         self.gate_proj = QuantLinear(org_module.gate_proj,
                                            args.weight_quant_params,
-                                           args.act_quant_params)
+                                           args.act_quant_params,
+                                           non_uniform_quant=args.non_uniform)
         self.down_proj = QuantLinear(org_module.down_proj,
                                            args.weight_quant_params,
-                                           args.act_quant_params)
+                                           args.act_quant_params,
+                                           non_uniform_quant=args.non_uniform)
         self.up_proj = QuantLinear(org_module.up_proj,
                                            args.weight_quant_params,
-                                           args.act_quant_params)
+                                           args.act_quant_params,
+                                           non_uniform_quant=args.non_uniform)
         self.act_fn = ACT2FN[hidden_act]
 
     def forward(self, x):
@@ -73,19 +76,25 @@ class QuantLlamaAttention(nn.Module):
             org_module.k_proj,
             args.weight_quant_params,
             args.act_quant_params,
+            non_uniform_quant=args.non_uniform,
         )
         self.v_proj = QuantLinear(
             org_module.v_proj,
             args.weight_quant_params,
             args.act_quant_params,
+            non_uniform_quant=args.non_uniform,
         )
         self.q_proj = QuantLinear(
             org_module.q_proj,
             args.weight_quant_params,
             args.act_quant_params,
+            non_uniform_quant=args.non_uniform,
         )
         self.o_proj = QuantLinear(
-            org_module.o_proj, args.weight_quant_params, args.act_quant_params
+            org_module.o_proj,
+            args.weight_quant_params,
+            args.act_quant_params,
+            non_uniform_quant=args.non_uniform,
         )
         self.qkt_matmul = QuantMatMul(
             args.q_quant_params, args.k_quant_params, matmul_func=torch.matmul
