@@ -268,12 +268,7 @@ def RLQuant(
                             cos: torch.Tensor = cossim(fp_inps[index:index+args.batch_size,], quant_out)/2 + 0.5
 
                             if args.softmax_weighted is not None and i == len(layers)-1:
-                                model.lm_head = typing.cast(nn.Linear, model.lm_head)
-                                model.lm_head.to(dev)
-                                
-                                if prev_lm_head_params is not None and not torch.equal(prev_lm_head_params, model.lm_head.weight):
-                                    logger.info("model.lm_head.weight is changed", prev_lm_head_params, model.lm_head.weight)
-                                prev_lm_head_params = model.lm_head.weight.detach().clone()
+                                model.lm_head = typing.cast(nn.Linear, model.lm_head.to(dev))
                                 
                                 lm_head_out = model.lm_head(quant_out)
                                 
