@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from quantize.quantizer import UniformAffineQuantizer
+from quantize.quantizer import UniformAffineQuantizer, NonUniformQuantizer
 
 
 
@@ -36,7 +36,7 @@ class QuantLinear(nn.Module):
         # initialize quantizer
         self.weight_quantizer = UniformAffineQuantizer(**weight_quant_params,shape=org_module.weight.shape)
         if not disable_input_quant:
-            self.act_quantizer = UniformAffineQuantizer(**act_quant_params)
+            self.act_quantizer = NonUniformQuantizer(**act_quant_params)
         else:
             self.act_quantizer = None
 
