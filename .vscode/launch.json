@@ -8,9 +8,14 @@
       "name": "Python Debugger: Current File with Arguments",
       "type": "debugpy",
       "request": "launch",
-      "program": "${file}",
+      "program": "main.py",
       "console": "integratedTerminal",
-      "args": "${command:pickArgs}",
+      "args": [
+        "--model", "./huggingface/llama-2-7b-hf",
+        "--output_dir", "./log/test/test",
+        "--lwc", "--let", "--multigpu", "--epochs", "1", "--nsamples", "128", "--debug",
+        "${command:pickArgs}",
+      ],
       "envFile": "${workspaceFolder}/.env"
     }
   ]
