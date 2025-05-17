@@ -284,7 +284,7 @@ def main():
     parser.add_argument("--loss_scale", type=float, default=1)
     parser.add_argument("--original_loss", default=False, action="store_true")
 
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
     if args.seed == "random":
         args.seed = random.randint(0, 2**32 - 1)
         
@@ -397,7 +397,7 @@ def main():
             seed=args.seed,
             model=args.model,
             seqlen=lm.seqlen,
-            cache_dir=None if args.cache_dataloader else f'{args.dataset_cache_dir}/dataloader.cache'
+            cache_dir=f'{args.dataset_cache_dir}/dataloader.cache' if args.cache_dataloader else None
         )   
 
         act_scales = None
