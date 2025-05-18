@@ -14,6 +14,7 @@ import gc
 import typing
 
 from models.LMClass import LMClass
+from quantize.utils import detect_outlier_channel
 
 
 def get_named_linears(module):
@@ -162,7 +163,11 @@ def RLQuant(
     quant_inps = inps # 첫 번째 layer에 넣을 임베딩된 입력
     fp_inps = copy.deepcopy(inps)   # take output of fp model as input
     fp_inps_2 = copy.deepcopy(inps) if args.aug_loss else None # take output of quantization model as input
-    attention_mask_batch = attention_mask.repeat(args.batch_size,1,1,1) if args.deactive_amp else attention_mask.repeat(args.batch_size,1,1,1).float()
+    attention_mask_batch = (
+        attention_mask.repeat(args.batch_size, 1, 1, 1)
+        if args.deactive_amp
+        else attention_mask.repeat(args.batch_size, 1, 1, 1).float()
+    )
     loss_func = torch.nn.MSELoss()
     # loss_func = torch.nn.L1Loss()
     cossim = nn.CosineSimilarity(dim=2)
@@ -174,12 +179,31 @@ def RLQuant(
     
     for i in range(len(layers)):
         logger.info(f"=== Start quantize layer {i} ===")
-        
+
         layer = layers[i].to(dev)
         qlayer = DecoderLayer(lm.model.config, layer, args)
         qlayer = qlayer.to(dev)
 
+        # if i > 0:
+        #     # can detect extreme outlier vector
+        #     # fp_inps_mag = fp_inps.square().mean(dim=1)
+        #     fp_inps_standardized_mag = fp_inps_standardized.square().mean(dim=(0,1))
+        #     outlier_channels = detect_outlier_channel(fp_inps_standardized_mag)
+        #     logger.info(f"outlier channels: {outlier_channels}")
+            
+        #     fp_inps[:, :, outlier_channels] = fp_inps[:, :, outlier_channels]/qlayer.outlier_scale
+        #     quant_inps[:, :, outlier_channels] = quant_inps[:, :, outlier_channels]/qlayer.outlier_scale
         
+        fp_inps_standardized = (
+            fp_inps - fp_inps.mean(dim=2, keepdim=True)
+        ) / fp_inps.std(dim=2, keepdim=True)
+        
+        fp_inps_standardized_mag = fp_inps_standardized.square().mean(dim=(0,1))
+        # outlier_channels = detect_outlier_channel(fp_inps_standardized_mag)
+        outlier_scales = (fp_inps_standardized_mag+1).log()+1
+        fp_inps = fp_inps/outlier_scales
+        quant_inps = quant_inps/outlier_scales
+
         # obtain output of full-precision model
         qlayer.set_quant_state(weight_quant=False, act_quant=False)
         if args.epochs > 0:
@@ -188,11 +212,11 @@ def RLQuant(
                     cache_inps = f'{args.model_cache_dir}/inps_{i+1}.cache'
                     if args.cache_input and os.path.exists(cache_inps):
                         del fp_inps
-                        fp_inps = torch.load(cache_inps)
+                        fp_inps = typing.cast(torch.Tensor, torch.load(cache_inps))
                         logger.info(f"load inps_{i+1} from {cache_inps}")
                     else:
                         for j in range(args.nsamples):
-                            fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0] # 현재 layer의 output 계산
+                            fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0] # 현재 layer의 output 계산 [1, 2048, 4096]
                         if args.cache_input:
                             torch.save(fp_inps, cache_inps)
         
@@ -228,6 +252,10 @@ def RLQuant(
                             qlayer.register_parameter(f"{pairs[key]}_smooth_shift",torch.nn.Parameter(shift)) # zero point?
                             qlayer.register_parameter(f"{pairs[key]}_smooth_scale",torch.nn.Parameter(scale)) # scaling factor
         
+        # if args.outlier_scale:
+        #     # init channel-wise scaling and shift
+        #     qlayer.register_parameter("outlier_scale",torch.nn.Parameter(torch.ones(1)))
+        
         if args.resume:
             qlayer.load_state_dict(rlq_parameters[i], strict=False)
         
@@ -238,7 +266,13 @@ def RLQuant(
                 qlayer.float()      # required for AMP training
             # create optimizer
             optimizer = torch.optim.AdamW(
-                [{"params":qlayer.let_parameters(use_shift),"lr":args.let_lr}, {"params":qlayer.lwc_parameters(),"lr":args.lwc_lr}],weight_decay=args.wd)
+                [
+                    {"params":qlayer.let_parameters(use_shift),"lr":args.let_lr},
+                    {"params":qlayer.lwc_parameters(),"lr":args.lwc_lr},
+                    # {"params":qlayer.outlier_parameters(),"lr":args.outlier_lr},
+                ],
+                weight_decay=args.wd
+            )
             loss_scaler = utils.NativeScalerWithGradNormCount()
                    
             for epochs in range(args.epochs):
@@ -249,7 +283,8 @@ def RLQuant(
                     # obtain output of quantization model
                     with traincast(): # 정밀도를 자동으로 맞춰줌
                         qlayer.smooth_and_quant_temporary()
-                        quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0] # 양자화된 layer output
+                        quant_out = qlayer(quant_inps[index:index+args.batch_size,], attention_mask=attention_mask_batch,position_ids=position_ids)[0] # 양자화된 layer output [1, 2048, 4096]
+                        # # quant_out[0, :, outlier_channels] = quant_out[0, :, outlier_channels]*0.1
                         
                         if args.original_loss:
                              # line 163에서 계산된 full-precision output과 quantized output을 비교, LMSE
@@ -299,6 +334,7 @@ def RLQuant(
                 with torch.cuda.amp.autocast():
                     for j in range(args.nsamples):
                         quant_inps[j] = qlayer(quant_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0] # 다음 layer에서 사용할 input 계산
+                        # quant_inps[j][:, outlier_channels] = quant_inps[j][:, outlier_channels]*0.1
             qlayer.register_scales_and_zeros()
             qlayer.half()
             layers[i] = qlayer.to("cpu")

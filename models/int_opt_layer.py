@@ -426,13 +426,20 @@ class QuantOPTDecoderLayer(nn.Module):
         for n, m in self.named_parameters():
             if n.find('bound_factor') > -1:
                 params.append(m)
-        return iter(params)  
+        return iter(params)
+    
+    def outlier_parameters(self):
+        params = []
+        for n, m in self.named_parameters():
+            if n.find('outlier') > -1:
+                params.append(m)
+        return iter(params)
 
     def rlq_parameters(self, use_shift=True):
         params = []
         template = "smooth" if use_shift else "smooth_scale"
         for n, m in self.named_parameters():
-            if n.find('bound_factor') > -1 or n.find(template) > -1:
+            if n.find('outlier') > -1 or n.find('bound_factor') > -1 or n.find(template) > -1:
                 params.append(m)
         return iter(params)  
     
