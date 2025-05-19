@@ -198,9 +198,10 @@ def RLQuant(
             fp_inps - fp_inps.mean(dim=2, keepdim=True)
         ) / fp_inps.std(dim=2, keepdim=True)
         
-        fp_inps_standardized_mag = fp_inps_standardized.square().mean(dim=(0,1))
+        fp_inps_standardized_mag = fp_inps_standardized.square().mean(dim=1)
         # outlier_channels = detect_outlier_channel(fp_inps_standardized_mag)
         outlier_scales = (fp_inps_standardized_mag+1).log()+1
+        outlier_scales = outlier_scales.unsqueeze(1)
         fp_inps = fp_inps/outlier_scales
         quant_inps = quant_inps/outlier_scales
 
