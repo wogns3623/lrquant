@@ -15,6 +15,8 @@ import typing
 
 from models.LMClass import LMClass
 
+from quantize.utils import TMAFilter
+
 
 def get_named_linears(module):
     return {name: m for name, m in module.named_modules() if isinstance(m, QuantLinear)}
@@ -122,7 +124,6 @@ def RLQuant(
 
         layers[0] = Catcher(layers[0])
         layers[0].is_llama = is_llama
-
         with torch.no_grad():
             for batch in dataloader:
                 if cache["i"] >= args.nsamples:
@@ -179,6 +180,15 @@ def RLQuant(
         qlayer = DecoderLayer(lm.model.config, layer, args)
         qlayer = qlayer.to(dev)
 
+        if args.remove_tma:
+            def log_tma_hook(module: TMAFilter, args: tuple[torch.Tensor]):
+                in_token_outlier_indices = module.find_massive_activation(args[0].squeeze())
+                if len(in_token_outlier_indices):
+                    logger.info(f"input outlier token found in layer {i}: {in_token_outlier_indices}")
+
+            for name, module in qlayer.named_modules():
+                if isinstance(module, TMAFilter):
+                    module.register_forward_pre_hook(log_tma_hook)
         
         # obtain output of full-precision model
         qlayer.set_quant_state(weight_quant=False, act_quant=False)

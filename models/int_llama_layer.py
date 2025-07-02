@@ -14,8 +14,7 @@ import pdb
 import copy
 from models.transformation import *
 
-
-
+from quantize.utils import TMAFilter
 
 class QuantLlamaMLP(nn.Module):
     def __init__(
@@ -40,9 +39,17 @@ class QuantLlamaMLP(nn.Module):
                                            args.weight_quant_params,
                                            args.act_quant_params)
         self.act_fn = ACT2FN[hidden_act]
+        self.remove_tma = args.remove_tma
+        if self.remove_tma:
+            self.tma_filter = TMAFilter()
 
     def forward(self, x):
-        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        interm = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
+        
+        if self.remove_tma:
+            interm = self.tma_filter(interm)
+        
+        return self.down_proj(interm)
 
 
 class QuantLlamaAttention(nn.Module):
