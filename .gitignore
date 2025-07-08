@@ -12,7 +12,7 @@ output
 cache/
 temp/
 checkpoints/
-huggingface/
+huggingface
 log*/
 act_scales/
 act_shifts/
