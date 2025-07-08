@@ -15,7 +15,8 @@ import typing
 
 from models.LMClass import LMClass
 
-from quantize.utils import TMAFilter
+from quantize.utils import MAFilter
+import itertools
 
 
 def get_named_linears(module):
@@ -179,16 +180,6 @@ def RLQuant(
         layer = layers[i].to(dev)
         qlayer = DecoderLayer(lm.model.config, layer, args)
         qlayer = qlayer.to(dev)
-
-        if args.remove_tma:
-            def log_tma_hook(module: TMAFilter, args: tuple[torch.Tensor]):
-                in_token_outlier_indices = module.find_massive_activation(args[0].squeeze())
-                if len(in_token_outlier_indices):
-                    logger.info(f"input outlier token found in layer {i}: {in_token_outlier_indices}")
-
-            for name, module in qlayer.named_modules():
-                if isinstance(module, TMAFilter):
-                    module.register_forward_pre_hook(log_tma_hook)
         
         # obtain output of full-precision model
         qlayer.set_quant_state(weight_quant=False, act_quant=False)
@@ -201,10 +192,27 @@ def RLQuant(
                         fp_inps = torch.load(cache_inps)
                         logger.info(f"load inps_{i+1} from {cache_inps}")
                     else:
+                        if args.remove_tma:
+                            remove_handles = []
+                            ma_informations: list[tuple] = []
+                            def log_tma_hook(module: MAFilter, args: tuple[torch.Tensor]):
+                                input = args[0].squeeze()
+                                ma_indices = module.find_massive_activation(input).nonzero() # [batch_index, seq_index]
+                                ma_informations.append((ma_indices, input[ma_indices].topk(2).values, input.flatten().max()))
+
+                            for name, module in qlayer.named_modules():
+                                if isinstance(module, MAFilter):
+                                    handle = module.register_forward_pre_hook(log_tma_hook)
+                                    remove_handles.append(handle)
                         for j in range(args.nsamples):
                             fp_inps[j] = qlayer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask,position_ids=position_ids)[0] # 현재 layer의 output 계산
                         if args.cache_input:
                             torch.save(fp_inps, cache_inps)
+                        if args.remove_tma:
+                            if any(len(x[0]) for x in ma_informations):
+                                logger.info(f"input outlier token found in layer {i}: {[(sample_idx, ma_info[0]) for sample_idx, ma_info in enumerate(ma_informations)]}")
+                            for handle in remove_handles:
+                                handle.remove()
         
                     if args.aug_loss:
                         for j in range(args.nsamples):
@@ -272,7 +280,7 @@ def RLQuant(
                             loss -= torch.log(cos) # LMSE + LNLC
                         else:
                             square_error = torch.square(fp_inps[index:index+args.batch_size,] - quant_out) # [1, 2048, 4096]
-                            mse_loss = square_error.mean(2) # [1, 2048]
+                            mse_loss = square_error.mean(dim=2) # [1, 2048]
 
                             # abs 대신 cossim 값을 0~1로 매핑함
                             cos: torch.Tensor = cossim(fp_inps[index:index+args.batch_size,], quant_out)/2 + 0.5
